@@ -1,0 +1,23 @@
+# Wandb
+wandb:
+  entity: # Your identity here
+  project: sampling_bench
+  resume: allow
+  mode: run
+  name:
+  tags:
+  id:
+
+# Hydra
+hydra:
+  run:
+    dir: ${log_dir}
+  sweep:
+    dir: ${hydra.run.dir}
+    subdir: ${hydra.job.override_dirname}
+
+# CometML
+cometml:
+  api_key: ${oc.env:COMETML_API_KEY}
+  project_name: early_stopping_gflow_jax
+  workspace: ${oc.env:COMETML_WORKSPACE}

@@ -1,0 +1,25 @@
+# Time-reversed Diffusion Sampler (DIS)
+name: dds
+step_size: ${target.dds.step_size}
+batch_size: ${target.all.batch_size}
+iters: ${target.all.iters}
+init_std: ${target.dds.init_std}
+num_steps: ${target.all.num_steps}
+loss: "elbo"  # Currently only supports 'elbo'
+grad_clip: 1.
+noise_scale: 6.
+
+# Learning rate scheduler
+lr_schedule:
+  type: multistep  # multistep | cosine | constant
+  milestones: ${target.all.milestones}  # iteration indices at which to decay
+  gamma: 0.3  # multiply LR by gamma at each milestone
+
+defaults:
+  - model: pisgrad_net
+
+model:
+  use_lp: ${target.all.use_lp}
+  num_hid: ${target.all.num_hid}
+  bias_init: 0.1  # Initialization of the last layers' bias of the time-dependent network
+  weight_init: 1e-8  # Initialization of the last layers' weights of the time-dependent network

@@ -1,0 +1,98 @@
+name: planar_robot_4goal
+has_entropy: False
+dim: 10
+num_goals: 4
+fn:
+  _target_: targets.planar_robot.PlanarRobot
+  dim: ${target.dim}
+  num_goals: ${target.num_goals}
+  log_Z:
+  can_sample: True
+  sample_bounds: None
+
+# Experiment-specific algorithm parameters
+# ----------------------------------------
+
+mfvi: # Gaussian Mean Field Variational Inference
+  init_std:
+  step_size:
+
+gmmvi: # Gaussian Mixture Model Variational Inference
+  init_std:
+
+hmc:  # Hamilton Monte Carlo
+  hmc_step_size: [0.01,0.001] #[0.01,0.1] 
+
+smc: # Sequential Monte Carlo Sampler
+  init_std: 2.
+
+smc_advanced:
+  init_std: 2.0
+  target_ess: 0.50
+  hmc_step_size: [0.01, 0.05]
+
+flow_transport: # Flow Transport Methods (AFT/CRAFT)
+  init_std: 2.0
+  step_size: 1e-3
+
+fab: # Flow Annealed Importance Sampling Bootstrap
+  init_std: 2.
+  step_size: 0.001
+
+cmcd: # CMCD
+  init_std: 2. #0.1
+  max_diffusion: 0.03
+  step_size: 1e-3
+
+dis: # DIS
+  init_std: 2.
+  step_size: 1e-3
+  max_diffusion: 0.3
+
+ud_langevin:  # Underdamped Langevin Methods (UHA/LDVI)
+  init_std:
+  step_size:
+
+od_langevin:  # Overdamped Langevin Methods (ULA/MCD/CMCD)
+  init_std:
+  step_size:
+
+############# HYPERPARAMETERS USED IN OUR PAPER #############
+# These can be slightly different from the original settings
+
+dds: # Denoising Diffusion Sampler
+  init_std: 2
+  step_size: 1e-3
+
+pis: # Path Integral Sampler
+  max_diffusion: 2.
+  step_size: 1e-5
+
+gfn_tb: # Trajectory Balance
+  reference_process: ou_dds  # pinned_brownian, ou, or ou_dds
+  init_std: 2.  # for ou or ou_dss
+  max_diffusion: 2.  # for pinned_brownian or ou
+  step_size: 1e-3
+  logZ_step_size: 1e-1
+  init_logZ: 0.
+
+gfn_subtb: # Sub-Trajectory Balance
+  reference_process: ou_dds  # pinned_brownian, ou, or ou_dds
+  init_std: 2.  # for ou or ou_dds
+  max_diffusion: 2.  # for pinned_brownian or ou
+  n_chunks: 32
+  step_size: 1e-3
+  logflow_step_size: 1e-3
+  beta_step_size: 1e-1
+  logZ_step_size: 1e-1  # for ou or ou_dds
+  init_logZ: 0.  # for ou or ou_dds
+  mcmc_step_size: 0.2
+  flow_num_hid: 256
+
+all: # Parameters that are shared between all algorithms
+  batch_size: 2000
+  iters: 40000
+  milestones: [20000, 30000]
+  num_steps: 128
+  use_lp: True
+  num_hid: 64

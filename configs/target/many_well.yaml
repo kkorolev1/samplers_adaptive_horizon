@@ -1,0 +1,116 @@
+name: many_well
+dim: 32
+a: -0.5
+b: -6.
+c: 1.
+has_entropy: False
+
+fn:
+  _target_: targets.many_well.ManyWellEnergy
+  dim: ${target.dim}
+  a: ${target.a}
+  b: ${target.b}
+  c: ${target.c}
+  can_sample: True
+  sample_bounds: None
+
+# Experiment-specific algorithm parameters
+# !!! Default Parameters; Currently not tuned for this experiment !!!
+# ----------------------------------------
+
+mfvi: # Gaussian Mean Field Variational Inference
+  init_std: 1.
+  step_size: 1e-3
+
+gmmvi: # Gaussian Mixture Model Variational Inference
+  init_std: 1.
+
+nfvi: # Normalizing Flow Variational Inference
+  init_std: 1.
+  step_size: 1e-3
+
+mh:
+  rwm_step_size: [0.1, 0.1]
+
+hmc:  # Hamilton Monte Carlo
+  hmc_step_size: [0.1, 0.1]
+
+smc: # Sequential Monte Carlo Sampler
+  init_std: 1.
+
+smc_advanced:
+  init_std: 1.0
+  target_ess: 0.99
+  hmc_step_size: [0.2, 0.1]
+
+flow_transport: # Flow Transport Methods (AFT/CRAFT)
+  init_std: 1.
+  step_size: 1e-3
+
+fab: # Flow Annealed Importance Sampling Bootstrap
+  init_std: 1.
+  step_size: 5e-4
+
+ud_langevin:  # Underdamped Langevin Methods (UHA/LDVI)
+  max_diffusion: 1.
+  init_std: 1.
+  step_size: 5e-4
+
+od_langevin:  # Overdamped Langevin Methods (ULA/MCD)
+  max_diffusion: 1.
+  init_std: 1.
+  step_size: 5e-4
+
+cmcd:  # Controlled Monte Carlo Diffusions
+  max_diffusion: 1.
+  init_std: 1.
+  step_size: 5e-4
+
+dis: # Time-reversed Diffusion Sampler
+  init_std: 1.
+  step_size: 5e-4
+
+gbs:  # General Bridge Sampler
+  max_diffusion: 1.
+  init_std: 1.
+  step_size: 5e-4
+
+############# HYPERPARAMETERS USED IN OUR PAPER #############
+# These can be slightly different from the original settings
+
+pis: # Path Integral Sampler
+  max_diffusion: 1.
+  step_size: 1e-3
+
+dds: # Denoising Diffusion Sampler
+  init_std: 1.
+  step_size: 1e-3
+
+gfn_tb: # Trajectory Balance
+  reference_process: ou_dds  # pinned_brownian, ou, or ou_dds
+  init_std: 1.  # for ou or ou_dss
+  max_diffusion: 1.  # for pinned_brownian or ou
+  step_size: 1e-3
+  logZ_step_size: 1e-1
+  init_logZ: 0.
+
+gfn_subtb: # Sub-Trajectory Balance
+  reference_process: ou_dds  # pinned_brownian, ou, or ou_dds
+  init_std: 1.  # for ou or ou_dds
+  max_diffusion: 1.  # for pinned_brownian or ou
+  n_chunks: 16
+  step_size: 1e-3
+  logflow_step_size: 1e-3
+  beta_step_size: 1e-1
+  logZ_step_size: 1e-1  # for ou or ou_dds
+  init_logZ: 0.  # for ou or ou_dds
+  mcmc_step_size: 0.2
+  flow_num_hid: 64
+
+all: # Parameters that are shared between all algorithms
+  batch_size: 2000
+  iters: 20000
+  milestones: [10000, 15000]
+  num_steps: 64
+  use_lp: False
+  num_hid: 256

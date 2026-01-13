@@ -1,0 +1,132 @@
+def get_train_fn(alg_name):
+    if alg_name == "mfvi":
+        from algorithms.mfvi.mfvi_trainer import mfvi_trainer
+
+        return mfvi_trainer
+
+    elif alg_name == "gmmvi":
+        from algorithms.gmmvi.gmmvi_trainer import gmmvi_trainer
+
+        return gmmvi_trainer
+
+    elif alg_name == "nfvi":
+        from algorithms.nfvi.nfvi_trainer import nfvi_trainer
+
+        return nfvi_trainer
+
+    elif alg_name == "smc":
+        from algorithms.smc.smc_trainer import smc_trainer
+
+        return smc_trainer
+
+    elif alg_name == "smc_advanced":
+        from algorithms.smc.smc_advanced import smc_advanced
+
+        return smc_advanced
+
+    elif alg_name == "aft":
+        from algorithms.aft.aft_trainer import aft_trainer
+
+        return aft_trainer
+
+    elif alg_name == "craft":
+        from algorithms.craft.craft_trainer import craft_trainer
+
+        return craft_trainer
+
+    elif alg_name == "fab":
+        from algorithms.fab.train.fab_trainer import fab_trainer
+
+        return fab_trainer
+
+    elif alg_name == "ula":
+        from algorithms.ula.ula_trainer import ula_trainer
+
+        return ula_trainer
+
+    elif alg_name == "uha":
+        from algorithms.uha.uha_trainer import uha_trainer
+
+        return uha_trainer
+
+    elif alg_name == "mcd":
+        from algorithms.mcd.mcd_trainer import mcd_trainer
+
+        return mcd_trainer
+
+    elif alg_name == "cmcd":
+        from algorithms.cmcd.cmcd_trainer import cmcd_trainer
+
+        return cmcd_trainer
+
+    elif alg_name == "ldvi_depr":
+        from algorithms.langevin_diffusion.ldvi_trainer import ldvi_trainer
+
+        return ldvi_trainer
+
+    elif alg_name == "ldvi":
+        from algorithms.ldvi.ldvi_trainer import ldvi_trainer
+
+        return ldvi_trainer
+
+    elif alg_name == "dis":
+        from algorithms.dis.dis_trainer import dis_trainer
+
+        return dis_trainer
+
+    elif alg_name == "pis":
+        from algorithms.pis.pis_trainer import pis_trainer
+
+        return pis_trainer
+
+    elif alg_name == "dds":
+        from algorithms.dds.dds_trainer import dds_trainer
+
+        return dds_trainer
+
+    elif alg_name == "gbs":
+        from algorithms.gbs.gbs_trainer import gbs_trainer
+
+        return gbs_trainer
+
+    elif alg_name == "gfn_tb":
+        from algorithms.gfn_tb.gfn_tb_trainer import gfn_tb_trainer
+
+        return gfn_tb_trainer
+
+    elif alg_name == "gfn_tb_iw":
+        from algorithms.gfn_tb.gfn_tb_iw_trainer import gfn_tb_iw_trainer
+
+        return gfn_tb_iw_trainer
+
+    elif alg_name == "gfn_subtb":
+        from algorithms.gfn_subtb.gfn_subtb_trainer import gfn_subtb_trainer
+
+        return gfn_subtb_trainer
+
+    elif alg_name == "gfn_subtb_smc":
+        from algorithms.gfn_subtb_smc.gfn_subtb_smc_trainer import gfn_subtb_smc_trainer
+
+        return gfn_subtb_smc_trainer
+
+    elif alg_name == "gfn_subtb_smc_hmc":
+        from algorithms.gfn_subtb_smc.gfn_subtb_smc_hmc_trainer import (
+            gfn_subtb_smc_hmc_trainer,
+        )
+
+        return gfn_subtb_smc_hmc_trainer
+
+    elif alg_name == "gfn_subtb_smc_nobuffer":
+        from algorithms.gfn_subtb_smc.gfn_subtb_smc_nobuffer_trainer import (
+            gfn_subtb_smc_nobuffer_trainer,
+        )
+
+        return gfn_subtb_smc_nobuffer_trainer
+    elif alg_name == "gfn_non_acyclic_db":
+        from algorithms.gfn_non_acyclic_db.gfn_non_acyclic_db_trainer import (
+            gfn_non_acyclic_db_trainer,
+        )
+
+        return gfn_non_acyclic_db_trainer
+    else:
+        raise ValueError(f"No algorithm named {alg_name}.")

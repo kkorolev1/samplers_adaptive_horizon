@@ -1,0 +1,77 @@
+name: lorenz
+dim: 90
+has_entropy: False
+
+fn:
+  _target_: targets.lorenz.Lorenz
+  log_Z:
+  can_sample: False
+  sample_bounds: None
+
+# Experiment-specific algorithm parameters
+# !!! Default Parameters; Currently not tuned for this experiment !!!
+# ----------------------------------------
+
+mfvi: # Gaussian Mean Field Variational Inference
+  init_std: 1.
+  step_size: 1e-3
+
+gmmvi: # Gaussian Mixture Model Variational Inference
+  init_std: 1.
+
+nfvi: # Normalizing Flow Variational Inference
+  init_std: 1.
+  step_size: 1e-3
+
+hmc:  # Hamilton Monte Carlo
+  hmc_step_size: [0.1, 0.1]
+
+smc: # Sequential Monte Carlo Sampler
+  init_std: 1.
+
+flow_transport: # Flow Transport Methods (AFT/CRAFT)
+  init_std: 1.
+  step_size: 1e-3
+
+fab: # Flow Annealed Importance Sampling Bootstrap
+  init_std: 1.
+  step_size: 5e-4
+
+ud_langevin:  # Underdamped Langevin Methods (UHA/LDVI)
+  max_diffusion: 1.
+  init_std: 1.
+  step_size: 5e-4
+
+od_langevin:  # Overdamped Langevin Methods (ULA/MCD)
+  max_diffusion: 1.
+  init_std: 1.
+  step_size: 5e-4
+
+cmcd:  # Controlled Monte Carlo Diffusions
+  max_diffusion: 1.
+  init_std: 1.
+  step_size: 5e-4
+
+pis: # Path Integral Sampler
+  max_diffusion: 1.
+  step_size: 5e-4
+
+dis: # Time-reversed Diffusion Sampler
+  init_std: 1.
+  step_size: 5e-4
+
+dds: # Denoising Diffusion Sampler
+  init_std: 1.
+  step_size: 5e-4
+
+gfn_tb: # Generative Flow Networks
+  max_diffusion: 1.
+  step_size: 5e-4
+
+gbs:  # General Bridge Sampler
+  max_diffusion: 1.
+  init_std: 1.
+  step_size: 5e-4
+
+all: # Parameters that are shared between all algorithms
+  batch_size: 2000

@@ -1,0 +1,99 @@
+name: many_well_554
+dim: 5
+m: 5
+delta: 4
+has_entropy: False
+
+fn:
+  _target_: targets.many_well.ManyWell2
+  dim: ${target.dim}
+  m: ${target.m}
+  delta: ${target.delta}
+  can_sample: True
+  sample_bounds: None
+
+# Experiment-specific algorithm parameters
+# ----------------------------------------
+
+mfvi: # Gaussian Mean Field Variational Inference
+  init_std: 1.
+  step_size: 1e-3
+
+gmmvi: # Gaussian Mixture Model Variational Inference
+  init_std: 1.
+
+hmc:  # Hamilton Monte Carlo
+  hmc_step_size: [0.01,0.001]
+
+smc: # Sequential Monte Carlo Sampler
+  init_std: 1.
+
+smc_advanced:
+  init_std: 1.
+  target_ess: 0.99
+  hmc_step_size: [0.2, 0.1]
+
+flow_transport: # Flow Transport Methods (AFT/CRAFT)
+  init_std: 1.
+  step_size: 1e-5
+
+fab: # Flow Annealed Importance Sampling Bootstrap
+  init_std: 1
+  step_size: 1e-4
+
+cmcd:  # Controlled Monte Carlo Diffusions
+  max_diffusion: 1. # sqrt(0.01 / (1 / 16))
+  init_std: 1.
+  step_size: 5e-4
+
+dis: # DIS
+  init_std: 1.
+  step_size: 1e-5
+
+ud_langevin:  # Underdamped Langevin Methods (UHA/LDVI)
+  init_std: 1.
+  step_size: 1e-3
+
+od_langevin:  # Overdamped Langevin Methods (ULA/MCD/CMCD)
+  init_std: 1.
+  step_size: 1e-3
+
+############# HYPERPARAMETERS USED IN OUR PAPER #############
+# These can be slightly different from the original settings
+
+pis: # Path Integral Sampler
+  max_diffusion: 1.
+  step_size: 1e-5
+
+dds: # Denoising Diffusion Sampler
+  init_std: 1.
+  step_size: 1e-5
+
+gfn_tb: # Trajectory Balance
+  reference_process: ou_dds  # pinned_brownian, ou, or ou_dds
+  init_std: 1.  # for ou or ou_dss
+  max_diffusion: 1.  # for pinned_brownian or ou
+  step_size: 1e-3
+  logZ_step_size: 1e-1
+  init_logZ: 0.
+
+gfn_subtb: # Sub-Trajectory Balance
+  reference_process: ou_dds  # pinned_brownian, ou, or ou_dds
+  init_std: 1.  # for ou or ou_dds
+  max_diffusion: 1.  # for pinned_brownian or ou
+  n_chunks: 16
+  step_size: 1e-3
+  logflow_step_size: 1e-3
+  beta_step_size: 1e-1
+  logZ_step_size: 1e-1  # for ou or ou_dds
+  init_logZ: 0.  # for ou or ou_dds
+  mcmc_step_size: 0.2
+  flow_num_hid: 64
+
+all: # Parameters that are shared between all algorithms
+  batch_size: 2000
+  iters: 20000
+  milestones: [10000, 15000]
+  num_steps: 64
+  use_lp: False
+  num_hid: 256
