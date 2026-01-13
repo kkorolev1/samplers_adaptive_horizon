@@ -41,8 +41,7 @@ def per_sample_rnd(
         ((fwd_clf_logits, fwd_mean, fwd_scale), _, log_f) = model_state.apply_fn(
             params,
             s,
-            jax.lax.stop_gradient(jax.grad(target.log_prob)(s)),
-            target.log_prob(s),
+            *jax.lax.stop_gradient(jax.value_and_grad(target.log_prob)(s)),
         )
         s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
         s_next = jax.lax.stop_gradient(s_next)
@@ -77,8 +76,7 @@ def per_sample_rnd(
         ((fwd_clf_logits, fwd_mean, fwd_scale), _, log_f) = model_state.apply_fn(
             params,
             s,
-            jax.lax.stop_gradient(jax.grad(target.log_prob)(s)),
-            target.log_prob(s),
+            *jax.lax.stop_gradient(jax.value_and_grad(target.log_prob)(s)),
         )
         fwd_log_prob = log_prob_kernel(
             s_next, fwd_mean, fwd_scale
@@ -130,7 +128,7 @@ def per_sample_rnd_eval(
 
         def non_term_step(s, key_gen):
             ((fwd_clf_logits, fwd_mean, fwd_scale), _, _) = model_state.apply_fn(
-                params, s, jax.lax.stop_gradient(jax.grad(target.log_prob)(s))
+                params, s, lgv_term=jax.lax.stop_gradient(jax.grad(target.log_prob)(s))
             )
             key, key_gen = jax.random.split(key_gen)
             is_terminal_next = jax.random.bernoulli(key, nn.sigmoid(fwd_clf_logits))
@@ -187,7 +185,7 @@ def per_sample_rnd_eval(
             )
 
             ((fwd_clf_logits, fwd_mean, fwd_scale), _, _) = model_state.apply_fn(
-                params, s, jax.lax.stop_gradient(jax.grad(target.log_prob)(s))
+                params, s, lgv_term=jax.lax.stop_gradient(jax.grad(target.log_prob)(s))
             )
 
             fwd_log_prob = log_prob_kernel(
@@ -292,9 +290,9 @@ def rnd(
 
     # We need to calculate log flow for the last continuous xs
     terminal_xs = jax.lax.stop_gradient(terminal_xs)
-    (_, _, terminal_log_fs) = jax.vmap(
-        model_state.apply_fn, in_axes=(None, 0, None, 0)
-    )(params, terminal_xs, None, log_rewards)
+    (_, _, terminal_log_fs) = jax.vmap(model_state.apply_fn, in_axes=(None, 0, 0))(
+        params, terminal_xs, log_rewards
+    )
     # We need to calculate bwd_log_prob for the first continuous xs
     init_xs = jax.lax.stop_gradient(trajectories[:, 0])
     (_, (bwd_clf_logits, *_), _) = jax.vmap(model_state.apply_fn, in_axes=(None, 0))(
@@ -351,7 +349,7 @@ def rnd_eval(
     keys = jax.random.split(key_gen, num=batch_size)
     terminal_xs, trajectories, fwd_log_probs, bwd_log_probs = jax.vmap(
         per_sample_rnd_eval,
-        in_axes=(0, None, None, 0, None, None, None, None),
+        in_axes=(0, None, None, 0, None, None, None, None, None),
     )(
         keys,
         model_state,
@@ -360,6 +358,7 @@ def rnd_eval(
         aux_tuple,
         target,
         num_steps,
+        initial_dist,
         prior_to_target,
     )
 
@@ -369,11 +368,6 @@ def rnd_eval(
         bwd_log_probs = bwd_log_probs[:, ::-1]
 
     trajectories = jnp.concatenate([trajectories, terminal_xs[:, None]], axis=1)
-
-    if initial_dist is None:  # pinned_brownian
-        init_fwd_log_probs = jnp.zeros(batch_size)
-    else:
-        init_fwd_log_probs = initial_dist.log_prob(trajectories[:, 0])
 
     if log_rewards is None:
         log_rewards = target.log_prob(terminal_xs)

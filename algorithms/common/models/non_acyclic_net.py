@@ -98,7 +98,7 @@ class NonAcyclicNet(nn.Module):
             ]
         )
 
-    def __call__(self, input_array, lgv_term=None, log_reward=None):
+    def __call__(self, input_array, log_reward=None, lgv_term=None):
         model_output = self.state_net(input_array)
         d = input_array.shape[-1]
 
@@ -136,8 +136,8 @@ class NonAcyclicNet(nn.Module):
         bwd_clf_logits = bwd_clf_logits.squeeze(-1)
 
         # DEBUG:
-        bwd_mean_corr = jnp.array(0.0)
-        bwd_scale_corr = jnp.array(0.0)
+        # bwd_mean_corr = jnp.array(0.0)
+        # bwd_scale_corr = jnp.array(0.0)
 
         # fmt: off
         bwd_mean = input_array - nn.softplus(bwd_mean_corr) * input_array * self.step_size
