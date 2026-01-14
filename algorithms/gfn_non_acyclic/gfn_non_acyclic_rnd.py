@@ -32,8 +32,6 @@ def per_sample_rnd(
     num_steps,
     prior_to_target=True,
 ):
-    step_size = aux_tuple
-
     def simulate_prior_to_target(state, per_step_input):
         s, key_gen = state
         s = jax.lax.stop_gradient(s)
@@ -115,8 +113,6 @@ def per_sample_rnd_eval(
     initial_dist,
     prior_to_target=True,
 ):
-    step_size = aux_tuple
-
     def simulate_prior_to_target(state, per_step_input):
         s, is_terminal, key_gen = state
         s = jax.lax.stop_gradient(s)
@@ -246,14 +242,14 @@ def per_sample_rnd_eval_ula(
     initial_dist,
     prior_to_target=True,
 ):
-    step_size = aux_tuple
+    (gamma,) = aux_tuple
 
     def simulate_prior_to_target(state, per_step_input):
         s, key_gen = state
         s = jax.lax.stop_gradient(s)
         langevin = jax.lax.stop_gradient(jax.grad(target.log_prob)(s))
-        fwd_mean = s + langevin * step_size
-        fwd_scale = jnp.sqrt(2 * step_size)
+        fwd_mean = s + langevin * gamma
+        fwd_scale = jnp.sqrt(2 * gamma)
         s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
         # TODO: Implement ULA
 

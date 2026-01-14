@@ -76,7 +76,7 @@ class NonAcyclicNet(nn.Module):
     weight_init: float = 1e-8
     bias_init: float = 0.1
 
-    step_size: float = 1.0
+    gamma: float = 1.0
     fwd_log_var_range: float = 4.0
     bwd_log_var_range: float = 4.0
     learn_fwd: bool = False
@@ -123,30 +123,26 @@ class NonAcyclicNet(nn.Module):
                 axis=-1,
             )
             # fmt: off
-            fwd_mean = input_array + (fwd_mean_corr + fwd_lgv_scale * lgv_term) * self.step_size
+            fwd_mean = input_array + (fwd_mean_corr + fwd_lgv_scale * lgv_term) * self.gamma
             fwd_scale = jnp.sqrt(
-                2 * jnp.exp(self.fwd_log_var_range * nn.tanh(fwd_scale_corr)) * self.step_size
+                2 * jnp.exp(self.fwd_log_var_range * nn.tanh(fwd_scale_corr)) * self.gamma
             )
         else:
             fwd_clf_logits, bwd_clf_logits, bwd_mean_corr, bwd_scale_corr = jnp.split(
                 model_output, [1, 2, 2 + d], axis=-1
             )
-            fwd_mean = input_array + lgv_term * self.step_size
-            fwd_scale = jnp.sqrt(2 * self.step_size)
+            fwd_mean = input_array + lgv_term * self.gamma
+            fwd_scale = jnp.sqrt(2 * self.gamma)
 
         fwd_mean = jnp.clip(fwd_mean, -self.outer_clip, self.outer_clip)
         fwd_clf_logits = fwd_clf_logits.squeeze(-1)
         bwd_clf_logits = bwd_clf_logits.squeeze(-1)
 
-        # DEBUG:
-        # bwd_mean_corr = jnp.array(0.0)
-        # bwd_scale_corr = jnp.array(0.0)
-
         # fmt: off
-        bwd_mean = input_array - nn.softplus(bwd_mean_corr) * input_array * self.step_size
+        bwd_mean = input_array - nn.softplus(bwd_mean_corr) * input_array * self.gamma
         bwd_mean = jnp.clip(bwd_mean, -self.outer_clip, self.outer_clip)
         bwd_scale = jnp.sqrt(
-            jnp.exp(self.bwd_log_var_range * nn.tanh(bwd_scale_corr)) * self.step_size
+            jnp.exp(self.bwd_log_var_range * nn.tanh(bwd_scale_corr)) * self.gamma
         )
 
         log_flow = jnp.array(0.0)

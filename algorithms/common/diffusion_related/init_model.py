@@ -63,8 +63,11 @@ def init_model(key, dim, alg_cfg) -> TrainState:
     model = NonAcyclicNet(**alg_cfg.model)
     # model = LangevinNetwork(**alg_cfg.model)
     key, key_gen = jax.random.split(key)
+    # fmt: off
     params = model.init(
-        key,
+        key_gen,
+        jnp.ones([alg_cfg.batch_size, dim]),
+        jnp.ones([alg_cfg.batch_size,]),
         jnp.ones([alg_cfg.batch_size, dim]),
         # jnp.ones([alg_cfg.batch_size, 1]),
         # jnp.ones([alg_cfg.batch_size, dim]),

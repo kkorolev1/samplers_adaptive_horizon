@@ -34,7 +34,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
     initial_dist = distrax.MultivariateNormalDiag(
         jnp.zeros(dim), jnp.ones(dim) * alg_cfg.init_std
     )
-    aux_tuple = alg_cfg.step_size
+    aux_tuple = (alg_cfg.model.gamma,)
 
     # Initialize the buffer
     use_buffer = buffer_cfg.use
@@ -138,6 +138,13 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
     # model_state.params["params"]["logZ"] = jnp.atleast_1d(logZ_init)
     # print(f"logZ_init: {logZ_init:.4f}")
 
+    def tree_l2_norm(tree):
+        leaves = jax.tree_util.tree_leaves(tree)
+        if not leaves:
+            return 0.0
+        return jnp.sqrt(sum([jnp.sum(jnp.square(jnp.asarray(x))) for x in leaves]))
+
+    grads = None
     ### Training phase
     for it in range(alg_cfg.iters):
         invtemp = get_invtemp(
@@ -195,9 +202,22 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
                     losses,
                 )
         if cfg.use_cometml:
-            exp.log_metrics({"loss": jnp.mean(losses)}, step=it)
+            params_norm = tree_l2_norm(
+                model_state.params.get("params", model_state.params)
+            )
+            grads_norm = (
+                tree_l2_norm(grads.get("params", grads))
+                if grads is not None
+                else jnp.nan
+            )
             exp.log_metrics(
-                {"logZ_learned": model_state.params["params"]["logZ"]}, step=it
+                {
+                    "loss": jnp.mean(losses),
+                    "logZ_learned": model_state.params["params"]["logZ"],
+                    "params_l2_norm": params_norm,
+                    "grads_l2_norm": grads_norm,
+                },
+                step=it,
             )
 
         if (it % eval_freq == 0) or (it == alg_cfg.iters - 1):
