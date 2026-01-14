@@ -114,13 +114,13 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         # logZ_estimates = []
         for _ in range(buffer_cfg.prefill_steps):
             key, key_gen = jax.random.split(key_gen)
-            _, (trajectories, log_pbs_over_pfs, log_rewards, losses) = (
-                loss_fwd_nograd_fn(key, model_state, model_state.params)
+            _, (trajectories, log_iws, log_rewards, losses) = loss_fwd_nograd_fn(
+                key, model_state, model_state.params
             )
             buffer_state = buffer.add(
                 buffer_state,
                 trajectories[:, -1],
-                (log_pbs_over_pfs.sum(-1) + log_rewards),
+                log_iws,
                 log_rewards,
                 losses,
             )
@@ -155,8 +155,8 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         if not use_buffer or it % (buffer_cfg.bwd_to_fwd_ratio + 1) == 0:
             # Sample from model
             key, key_gen = jax.random.split(key_gen)
-            grads, (trajectories, log_pbs_over_pfs, log_rewards, losses) = (
-                loss_fwd_grad_fn(key, model_state, model_state.params, invtemp=invtemp)
+            grads, (trajectories, log_iws, log_rewards, losses) = loss_fwd_grad_fn(
+                key, model_state, model_state.params, invtemp=invtemp
             )
             model_state = model_state.apply_gradients(grads=grads)
 
@@ -165,7 +165,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
                 buffer_state = buffer.add(
                     buffer_state,
                     trajectories[:, -1],
-                    (log_pbs_over_pfs.sum(-1) + log_rewards),
+                    log_iws,
                     log_rewards,
                     losses,
                 )

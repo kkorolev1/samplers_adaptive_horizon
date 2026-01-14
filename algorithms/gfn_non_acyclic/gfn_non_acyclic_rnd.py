@@ -97,8 +97,14 @@ def per_sample_rnd(
         aux, per_step_output = jax.lax.scan(
             simulate_target_to_prior, aux, jnp.arange(num_steps)[::-1]
         )
-
     trajectory, fwd_log_prob, bwd_log_prob, log_f = per_step_output
+
+    if not prior_to_target:
+        trajectory = trajectory[::-1]
+        fwd_log_prob = fwd_log_prob[::-1]
+        bwd_log_prob = bwd_log_prob[::-1]
+        log_f = log_f[::-1]
+
     return terminal_x, trajectory, fwd_log_prob, bwd_log_prob, log_f
 
 
@@ -161,8 +167,9 @@ def per_sample_rnd_eval(
         s_next = jax.lax.stop_gradient(s_next)
 
         def term_step(s_next, key_gen):
+            # fmt: off
             next_state = (jnp.zeros_like(s_next), jnp.array(True), key_gen)
-            per_step_output = (s_next, jnp.array(True), jnp.array(0.0), jnp.array(0.0))
+            per_step_output = (jnp.zeros_like(s_next), jnp.array(True), jnp.array(0.0), jnp.array(0.0))
             return next_state, per_step_output
 
         def non_term_step(s_next, key_gen):
@@ -211,24 +218,24 @@ def per_sample_rnd_eval(
         )
         terminal_x, is_terminal_x, _ = aux
         trajectory, terminal_mask, _, _ = per_step_output
-
         terminal_mask = jnp.concatenate(
             [terminal_mask, jnp.expand_dims(is_terminal_x, axis=0)], axis=0
         )
-        terminal_index = jnp.where(~terminal_mask, size=num_steps)[0].max()
-        full_traj = jnp.concatenate(
+        trajectory_length = jnp.where(~terminal_mask, size=num_steps)[0].max() + 1
+        trajectory = jnp.concatenate(
             [trajectory, jnp.expand_dims(terminal_x, axis=0)], axis=0
         )
-        terminal_x = full_traj[terminal_index]
+        terminal_x = trajectory[trajectory_length - 1]
     else:
         terminal_x = input_state
         aux = (terminal_x, jnp.array(False), key)
         aux, per_step_output = jax.lax.scan(
             simulate_target_to_prior, aux, jnp.arange(num_steps)[::-1]
         )
-
-    trajectory, terminal_mask, fwd_log_prob, bwd_log_prob = per_step_output
-    return terminal_x, trajectory, fwd_log_prob, bwd_log_prob
+        _, terminal_mask, _, _ = per_step_output
+        trajectory_length = jnp.where(~terminal_mask, size=num_steps)[0].max() + 2
+    _, _, fwd_log_prob, bwd_log_prob = per_step_output
+    return terminal_x, trajectory_length, fwd_log_prob - bwd_log_prob
 
 
 def per_sample_rnd_eval_ula(
@@ -242,46 +249,60 @@ def per_sample_rnd_eval_ula(
     initial_dist,
     prior_to_target=True,
 ):
-    (gamma,) = aux_tuple
+    pass
 
-    def simulate_prior_to_target(state, per_step_input):
-        s, key_gen = state
-        s = jax.lax.stop_gradient(s)
-        langevin = jax.lax.stop_gradient(jax.grad(target.log_prob)(s))
-        fwd_mean = s + langevin * gamma
-        fwd_scale = jnp.sqrt(2 * gamma)
-        s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
-        # TODO: Implement ULA
 
-    def simulate_target_to_prior(state, per_step_input):
-        pass
+# def per_sample_rnd_eval_ula(
+#     key,
+#     model_state,
+#     params,
+#     input_state: Array,
+#     aux_tuple,
+#     target,
+#     num_steps,
+#     initial_dist,
+#     prior_to_target=True,
+# ):
+#     (gamma,) = aux_tuple
 
-    if prior_to_target:
-        init_x = input_state
-        aux = (init_x, jnp.array(False), key)
-        aux, per_step_output = jax.lax.scan(
-            simulate_prior_to_target, aux, jnp.arange(num_steps)
-        )
-        terminal_x, is_terminal_x, _ = aux
-        trajectory, terminal_mask, _, _ = per_step_output
+#     def simulate_prior_to_target(state, per_step_input):
+#         s, key_gen = state
+#         s = jax.lax.stop_gradient(s)
+#         langevin = jax.lax.stop_gradient(jax.grad(target.log_prob)(s))
+#         fwd_mean = s + langevin * gamma
+#         fwd_scale = jnp.sqrt(2 * gamma)
+#         s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
+#         # TODO: Implement ULA
 
-        terminal_mask = jnp.concatenate(
-            [terminal_mask, jnp.expand_dims(is_terminal_x, axis=0)], axis=0
-        )
-        terminal_index = jnp.where(~terminal_mask, size=num_steps)[0].max()
-        full_traj = jnp.concatenate(
-            [trajectory, jnp.expand_dims(terminal_x, axis=0)], axis=0
-        )
-        terminal_x = full_traj[terminal_index]
-    else:
-        terminal_x = input_state
-        aux = (terminal_x, jnp.array(False), key)
-        aux, per_step_output = jax.lax.scan(
-            simulate_target_to_prior, aux, jnp.arange(num_steps)[::-1]
-        )
+#     def simulate_target_to_prior(state, per_step_input):
+#         pass
 
-    trajectory, terminal_mask, fwd_log_prob, bwd_log_prob = per_step_output
-    return terminal_x, trajectory, fwd_log_prob, bwd_log_prob
+#     if prior_to_target:
+#         init_x = input_state
+#         aux = (init_x, jnp.array(False), key)
+#         aux, per_step_output = jax.lax.scan(
+#             simulate_prior_to_target, aux, jnp.arange(num_steps)
+#         )
+#         terminal_x, is_terminal_x, _ = aux
+#         trajectory, terminal_mask, _, _ = per_step_output
+
+#         terminal_mask = jnp.concatenate(
+#             [terminal_mask, jnp.expand_dims(is_terminal_x, axis=0)], axis=0
+#         )
+#         terminal_index = jnp.where(~terminal_mask, size=num_steps)[0].max()
+#         full_traj = jnp.concatenate(
+#             [trajectory, jnp.expand_dims(terminal_x, axis=0)], axis=0
+#         )
+#         terminal_x = full_traj[terminal_index]
+#     else:
+#         terminal_x = input_state
+#         aux = (terminal_x, jnp.array(False), key)
+#         aux, per_step_output = jax.lax.scan(
+#             simulate_target_to_prior, aux, jnp.arange(num_steps)[::-1]
+#         )
+
+#     trajectory, terminal_mask, fwd_log_prob, bwd_log_prob = per_step_output
+#     return terminal_x, fwd_log_prob, bwd_log_prob
 
 
 def rnd(
@@ -317,13 +338,6 @@ def rnd(
         num_steps,
         prior_to_target,
     )
-
-    if not prior_to_target:
-        trajectories = trajectories[:, ::-1]
-        fwd_log_probs = fwd_log_probs[:, ::-1]
-        bwd_log_probs = bwd_log_probs[:, ::-1]
-        log_fs = log_fs[:, ::-1]
-
     trajectories = jnp.concatenate([trajectories, terminal_xs[:, None]], axis=1)
 
     if initial_dist is None:  # pinned_brownian
@@ -358,12 +372,12 @@ def rnd(
     )
     log_pfs_over_pbs = fwd_log_probs - bwd_log_probs
     return (
-        trajectories[:, -1],
-        log_pfs_over_pbs.sum(1),
-        jnp.zeros_like(log_rewards),
-        -log_rewards,
+        trajectories[:, -1],  # samples
+        log_pfs_over_pbs.sum(1),  # running costs
+        jnp.zeros_like(log_rewards),  # stochastic costs
+        -log_rewards,  # terminal costs
         trajectories,
-        log_pfs_over_pbs,  # log_pfs - log_pbs
+        log_pfs_over_pbs,
         log_fs,
     )
 
@@ -380,7 +394,6 @@ def rnd_eval(
     initial_dist: distrax.Distribution | None = None,
     reference_process: Literal["learnable", "ula"] = "learnable",
     terminal_xs: Array | None = None,
-    log_rewards: Array | None = None,
 ):
     if prior_to_target:
         key, key_gen = jax.random.split(key_gen)
@@ -393,7 +406,7 @@ def rnd_eval(
         "learnable": per_sample_rnd_eval,
         "ula": per_sample_rnd_eval_ula,
     }[reference_process]
-    terminal_xs, trajectories, fwd_log_probs, bwd_log_probs = jax.vmap(
+    terminal_xs, trajectories_length, log_pfs_over_pbs = jax.vmap(
         per_sample_fn,
         in_axes=(0, None, None, 0, None, None, None, None, None),
     )(
@@ -407,25 +420,31 @@ def rnd_eval(
         initial_dist,
         prior_to_target,
     )
+    log_pfs_over_pbs = log_pfs_over_pbs.sum(1)
 
-    if not prior_to_target:
-        trajectories = trajectories[:, ::-1]
-        fwd_log_probs = fwd_log_probs[:, ::-1]
-        bwd_log_probs = bwd_log_probs[:, ::-1]
-
-    trajectories = jnp.concatenate([trajectories, terminal_xs[:, None]], axis=1)
-
-    if log_rewards is None:
+    if prior_to_target:
+        # We need to add fwd/bwd_log_prob for the first continuous xs
+        init_xs = jax.lax.stop_gradient(input_states)
+        init_fwd_log_probs = initial_dist.log_prob(init_xs)
+        (_, (bwd_clf_logits, *_), _) = model_state.apply_fn(params, init_xs)
+        log_pfs_over_pbs = (
+            log_pfs_over_pbs + init_fwd_log_probs - nn.log_sigmoid(bwd_clf_logits)
+        )
+    else:
+        # We need to add fwd/bwd_log_prob for the last continuous xs
+        terminal_xs = jax.lax.stop_gradient(terminal_xs)
         log_rewards = target.log_prob(terminal_xs)
+        ((fwd_clf_logits, *_), _, _) = model_state.apply_fn(params, terminal_xs)
+        log_pfs_over_pbs = (
+            log_pfs_over_pbs + nn.log_sigmoid(fwd_clf_logits) - log_rewards
+        )
 
-    log_pfs_over_pbs = fwd_log_probs - bwd_log_probs
     return (
-        trajectories[:, -1],
-        log_pfs_over_pbs.sum(1),
-        jnp.zeros_like(log_rewards),
-        -log_rewards,
-        trajectories,
-        log_pfs_over_pbs,  # log_pfs - log_pbs
+        terminal_xs,  # samples
+        log_pfs_over_pbs,  # running costs
+        jnp.zeros_like(log_pfs_over_pbs),  # stochastic costs
+        jnp.zeros_like(log_pfs_over_pbs),  # terminal costs
+        trajectories_length,
     )
 
 
@@ -438,7 +457,6 @@ def loss_fn(
     logr_clip: float = -1e5,
     huber_delta: float | None = None,
 ):
-    # samples, running_costs, stochastic_costs, terminal_costs,...
     (
         _,
         _,
@@ -464,7 +482,7 @@ def loss_fn(
 
     return jnp.mean(db_losses.mean(-1)), (
         trajectories,
-        jax.lax.stop_gradient(-log_pfs_over_pbs),  # log(pb(s'->s)/pf(s->s'))
+        jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),  # log(pb(s'->s)/pf(s->s'))
         -terminal_costs,  # log_rewards
         jax.lax.stop_gradient(db_losses),
     )

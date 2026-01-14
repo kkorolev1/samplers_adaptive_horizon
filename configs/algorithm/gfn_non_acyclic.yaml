@@ -16,7 +16,7 @@ logr_clip: -1e5
 lr_schedule:
   type: multistep  # multistep | cosine | constant
   milestones: ${target.all.milestones}  # iteration indices at which to decay
-  gamma: 0.3  # multiply LR by gamma at each milestone
+  gamma: 1.0  # multiply LR by gamma at each milestone
 
 defaults:
   - model: pisgrad_net

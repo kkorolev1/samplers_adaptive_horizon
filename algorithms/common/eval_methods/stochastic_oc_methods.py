@@ -96,6 +96,8 @@ def get_eval_fn(rnd, target, target_xs, cfg):
         "stats/nfe": [],
         "log_var/log_var": [],
         "log_var/traj_bal_ln_z": [],
+        "mean_traj_length/reverse": [],
+        "mean_traj_length/forward": [],
     }
 
     def short_eval(model_state, key):
@@ -104,9 +106,13 @@ def get_eval_fn(rnd, target, target_xs, cfg):
             params = (model_state1.params, model_state2.params)
         else:
             params = (model_state.params,)
-        samples, running_costs, stochastic_costs, terminal_costs = rnd_reverse(
-            key, model_state, *params
-        )[:4]
+        (
+            samples,
+            running_costs,
+            stochastic_costs,
+            terminal_costs,
+            trajectories_length,
+        ) = rnd_reverse(key, model_state, *params)[:4]
 
         log_is_weights = -(running_costs + stochastic_costs + terminal_costs)
         ln_z = jax.scipy.special.logsumexp(log_is_weights) - jnp.log(cfg.eval_samples)
@@ -116,6 +122,7 @@ def get_eval_fn(rnd, target, target_xs, cfg):
         if target.log_Z is not None:
             logger["logZ/delta_reverse"].append(jnp.abs(ln_z - target.log_Z))
 
+        logger["mean_traj_length/reverse"].append(jnp.mean(trajectories_length))
         logger["logZ/reverse"].append(ln_z)
         logger["KL/elbo"].append(elbo)
         logger["ESS/reverse"].append(
@@ -133,6 +140,7 @@ def get_eval_fn(rnd, target, target_xs, cfg):
                 fwd_running_costs,
                 fwd_stochastic_costs,
                 fwd_terminal_costs,
+                fwd_trajectories_length,
             ) = rnd_forward(jax.random.PRNGKey(0), model_state, *params)[:4]
             fwd_log_is_weights = -(
                 fwd_running_costs + fwd_stochastic_costs + fwd_terminal_costs
@@ -155,6 +163,7 @@ def get_eval_fn(rnd, target, target_xs, cfg):
             logger["logZ/forward"].append(fwd_ln_z)
             logger["KL/eubo"].append(eubo)
             logger["ESS/forward"].append(fwd_ess)
+            logger["mean_traj_length/forward"].append(jnp.mean(fwd_trajectories_length))
 
         logger.update(target.visualise(samples=samples))
         logger.update(
