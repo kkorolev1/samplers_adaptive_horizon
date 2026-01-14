@@ -453,6 +453,7 @@ def loss_fn(
     model_state: TrainState,
     params: ModelParams,
     rnd_partial: Callable[[RandomKey, TrainState, ModelParams], tuple[Array, ...]],
+    reg_coef: float = 0.0,
     invtemp: float = 1.0,
     logr_clip: float = -1e5,
     huber_delta: float | None = None,
@@ -480,7 +481,7 @@ def loss_fn(
     else:
         db_losses = jnp.square(db_discrepancy)
 
-    return jnp.mean(db_losses.mean(-1)), (
+    return jnp.mean(db_losses.mean(1) + reg_coef * log_fs[:, 1:].mean(1)), (
         trajectories,
         jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),  # log(pb(s'->s)/pf(s->s'))
         -terminal_costs,  # log_rewards

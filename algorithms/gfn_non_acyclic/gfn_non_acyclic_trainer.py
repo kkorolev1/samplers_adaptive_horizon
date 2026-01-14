@@ -28,6 +28,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
     buffer_cfg = alg_cfg.buffer
     batch_size = alg_cfg.batch_size
     num_steps = alg_cfg.num_steps
+    reg_coef = alg_cfg.reg_coef
 
     target_xs = target.sample(jax.random.PRNGKey(0), (cfg.eval_samples,))
 
@@ -68,7 +69,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         num_steps=1_000,
         initial_dist=initial_dist,
     )
-    loss_fn_base = partial(loss_fn, logr_clip=alg_cfg.logr_clip)
+    loss_fn_base = partial(loss_fn, logr_clip=alg_cfg.logr_clip, reg_coef=reg_coef)
 
     # Define the function to be JIT-ed for FWD pass
     @partial(jax.jit)

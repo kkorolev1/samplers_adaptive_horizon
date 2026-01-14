@@ -24,6 +24,7 @@ gfn_non_acyclic:
   logZ_step_size: 1e-1
   init_logZ: 0.
   gamma: 0.5
+  reg_coef: 1e-3
 
 all: # Parameters that are shared between all algorithms
   batch_size: 2000

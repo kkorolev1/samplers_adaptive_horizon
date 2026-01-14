@@ -89,6 +89,7 @@ def init_model(key, dim, alg_cfg) -> TrainState:
                 learning_rate=build_lr_schedule(alg_cfg.step_size)
             )
         }
+
         if "gfn_subtb" in alg_cfg.name:
             optimizers_map["logflow_optim"] = optax.adam(
                 learning_rate=build_lr_schedule(alg_cfg.logflow_step_size)
@@ -110,6 +111,8 @@ def init_model(key, dim, alg_cfg) -> TrainState:
         param_labels = path_aware_map(pisgrad_net_label_map, params)
         partitioned_optimizer = optax.multi_transform(optimizers_map, param_labels)
 
+        mask_fn = lambda p: jax.tree.map(lambda x: x.ndim != 1, p)
+
         optimizer = optax.chain(
             optax.zero_nans(),
             (
@@ -117,6 +120,7 @@ def init_model(key, dim, alg_cfg) -> TrainState:
                 if alg_cfg.grad_clip > 0
                 else optax.identity()
             ),
+            optax.masked(optax.add_decayed_weights(alg_cfg.weight_decay), mask_fn),
             partitioned_optimizer,
         )
 
