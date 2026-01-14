@@ -1,5 +1,5 @@
 # Generative Flow Networks (GFN) with Trajectory Balance (TB) loss
-name: gfn_non_acyclic_db
+name: gfn_non_acyclic_ula
 step_size: ${target.gfn_non_acyclic_db.step_size}
 batch_size: ${target.all.batch_size}
 iters: ${target.all.iters}

@@ -5,7 +5,10 @@ import chex
 import jax
 import jax.numpy as jnp
 
-from algorithms.gfn_tb.sampling_utils import binary_search_smoothing, get_sampling_func
+from algorithms.gfn_non_acyclic.sampling_utils import (
+    binary_search_smoothing,
+    get_sampling_func,
+)
 
 
 ### Helper Functions ###
@@ -157,7 +160,9 @@ def build_terminal_state_buffer(
     max_length: int,
     prioritize_by: str,
     target_ess: float = 0.0,
-    sampling_method: Literal["multinomial", "stratified", "systematic", "rank"] = "multinomial",
+    sampling_method: Literal[
+        "multinomial", "stratified", "systematic", "rank"
+    ] = "multinomial",
     rank_k: float = 0.01,
 ) -> TerminalBuffer:
     """
@@ -194,7 +199,9 @@ def build_terminal_state_buffer(
         # Pre-allocate memory for the buffer
         buffer_states = jnp.zeros((max_length, dim), dtype=dtype, device=device)
         buffer_log_rewards = jnp.zeros((max_length,), dtype=dtype, device=device)
-        buffer_priorities = -jnp.inf * jnp.ones((max_length,), dtype=dtype, device=device)
+        buffer_priorities = -jnp.inf * jnp.ones(
+            (max_length,), dtype=dtype, device=device
+        )
 
         data = TerminalStateData(
             states=buffer_states,
@@ -221,7 +228,9 @@ def build_terminal_state_buffer(
     ) -> TerminalStateBufferState:
         """Adds a new batch of data to the buffer."""
         chex.assert_rank(states, 2)
-        priorities = get_priorities_partial(log_iws=log_iws, log_rewards=log_rewards, losses=losses)
+        priorities = get_priorities_partial(
+            log_iws=log_iws, log_rewards=log_rewards, losses=losses
+        )
         chex.assert_rank(priorities, 1)
         batch_size = states.shape[0]  # type: ignore
 
@@ -256,7 +265,9 @@ def build_terminal_state_buffer(
     ) -> Tuple[chex.Array, chex.Array, chex.Array]:
         """Samples a batch from the buffer in proportion to priorities."""
         # Determine the number of valid items currently in the buffer
-        buffer_size = jax.lax.select(buffer_state.is_full, max_length, buffer_state.current_index)
+        buffer_size = jax.lax.select(
+            buffer_state.is_full, max_length, buffer_state.current_index
+        )
 
         # Get priorities of valid items
         valid_priorities = buffer_state.data.priorities[:buffer_size]  # type: ignore

@@ -105,6 +105,8 @@ class NonAcyclicNet(nn.Module):
         # if we don't want to calculate fwd
         if lgv_term is None:
             lgv_term = jnp.zeros_like(input_array)
+        else:
+            lgv_term = jnp.clip(lgv_term, -self.inner_clip, self.inner_clip)
 
         if self.learn_fwd:
             (
@@ -132,6 +134,7 @@ class NonAcyclicNet(nn.Module):
             fwd_mean = input_array + lgv_term * self.step_size
             fwd_scale = jnp.sqrt(2 * self.step_size)
 
+        fwd_mean = jnp.clip(fwd_mean, -self.outer_clip, self.outer_clip)
         fwd_clf_logits = fwd_clf_logits.squeeze(-1)
         bwd_clf_logits = bwd_clf_logits.squeeze(-1)
 
@@ -141,6 +144,7 @@ class NonAcyclicNet(nn.Module):
 
         # fmt: off
         bwd_mean = input_array - nn.softplus(bwd_mean_corr) * input_array * self.step_size
+        bwd_mean = jnp.clip(bwd_mean, -self.outer_clip, self.outer_clip)
         bwd_scale = jnp.sqrt(
             jnp.exp(self.bwd_log_var_range * nn.tanh(bwd_scale_corr)) * self.step_size
         )

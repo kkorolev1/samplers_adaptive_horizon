@@ -1,0 +1,34 @@
+name: gaussian_mixture9
+num_components: 9
+dim: 2
+has_entropy: True
+
+fn:
+  _target_: targets.gmm9.GMM9
+  num_components: ${target.num_components}
+  dim: ${target.dim}
+  log_Z: 0.
+  can_sample: True
+  sample_bounds: None
+  loc_scaling: 40
+  scale_scaling: 1
+
+# Experiment-specific algorithm parameters
+# !!! Default Parameters; Currently not tuned for this experiment !!!
+# ----------------------------------------
+
+gfn_non_acyclic:
+  reference_process: ula
+  init_std: 1.0
+  step_size: 0.5
+  num_steps: 200
+  logZ_step_size: 1e-1
+  init_logZ: 0.
+
+all: # Parameters that are shared between all algorithms
+  batch_size: 2000
+  iters: 20000
+  milestones: [10000, 15000]
+  num_steps: 64
+  use_lp: False
+  num_hid: 256

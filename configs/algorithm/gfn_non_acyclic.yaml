@@ -1,0 +1,41 @@
+# Generative Flow Networks (GFN) with Trajectory Balance (TB) loss
+name: gfn_non_acyclic
+step_size: ${target.gfn_non_acyclic.step_size}
+batch_size: ${target.all.batch_size}
+iters: ${target.all.iters}
+num_steps: ${target.gfn_non_acyclic.num_steps}
+grad_clip: 1.
+loss_type: "tb"  # lv or tb
+init_logZ: ${target.gfn_non_acyclic.init_logZ}
+logZ_step_size: ${target.gfn_non_acyclic.logZ_step_size}
+reference_process: ${target.gfn_non_acyclic.reference_process}  # ou or pinned_brownian
+init_std: ${target.gfn_non_acyclic.init_std}  # for ou
+init_invtemp: 1.
+logr_clip: -1e5
+
+# Learning rate scheduler
+lr_schedule:
+  type: multistep  # multistep | cosine | constant
+  milestones: ${target.all.milestones}  # iteration indices at which to decay
+  gamma: 0.3  # multiply LR by gamma at each milestone
+
+defaults:
+  - model: pisgrad_net
+
+model:
+  num_hid: ${target.all.num_hid}
+  weight_init: 1e-8  # Initialization of the last layers' weights of the time-dependent network
+  bias_init: 0.1  # Initialization of the last layers' bias of the time-dependent network
+  step_size: ${target.gfn_non_acyclic.step_size}
+
+buffer:
+  use: True
+  max_length_in_batches: 100
+  prioritize_by: "reward"  # none, reward, loss, uiw, piw
+  target_ess: 0.05
+  sampling_method: "systematic"  # multinomial, stratified, systematic, rank
+  rank_k: 0.01  # only used if sampling_method is rank
+  sample_with_replacement: True
+  prefill_steps: 100  # collect `prefill_steps` batches before starting training
+  bwd_to_fwd_ratio: 2  # number of bwd steps per fwd step
+  update_score: False

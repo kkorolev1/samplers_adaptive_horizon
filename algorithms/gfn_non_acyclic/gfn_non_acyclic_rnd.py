@@ -8,7 +8,7 @@ import numpyro.distributions as npdist
 from flax.training.train_state import TrainState
 
 from algorithms.common.types import Array, RandomKey, ModelParams
-from algorithms.gfn_non_acyclic_db.sampling_utils import binary_search_smoothing
+from algorithms.gfn_non_acyclic.sampling_utils import binary_search_smoothing
 
 
 def sample_kernel(key_gen, mean, scale):
@@ -235,6 +235,59 @@ def per_sample_rnd_eval(
     return terminal_x, trajectory, fwd_log_prob, bwd_log_prob
 
 
+def per_sample_rnd_eval_ula(
+    key,
+    model_state,
+    params,
+    input_state: Array,
+    aux_tuple,
+    target,
+    num_steps,
+    initial_dist,
+    prior_to_target=True,
+):
+    step_size = aux_tuple
+
+    def simulate_prior_to_target(state, per_step_input):
+        s, key_gen = state
+        s = jax.lax.stop_gradient(s)
+        langevin = jax.lax.stop_gradient(jax.grad(target.log_prob)(s))
+        fwd_mean = s + langevin * step_size
+        fwd_scale = jnp.sqrt(2 * step_size)
+        s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
+        # TODO: Implement ULA
+
+    def simulate_target_to_prior(state, per_step_input):
+        pass
+
+    if prior_to_target:
+        init_x = input_state
+        aux = (init_x, jnp.array(False), key)
+        aux, per_step_output = jax.lax.scan(
+            simulate_prior_to_target, aux, jnp.arange(num_steps)
+        )
+        terminal_x, is_terminal_x, _ = aux
+        trajectory, terminal_mask, _, _ = per_step_output
+
+        terminal_mask = jnp.concatenate(
+            [terminal_mask, jnp.expand_dims(is_terminal_x, axis=0)], axis=0
+        )
+        terminal_index = jnp.where(~terminal_mask, size=num_steps)[0].max()
+        full_traj = jnp.concatenate(
+            [trajectory, jnp.expand_dims(terminal_x, axis=0)], axis=0
+        )
+        terminal_x = full_traj[terminal_index]
+    else:
+        terminal_x = input_state
+        aux = (terminal_x, jnp.array(False), key)
+        aux, per_step_output = jax.lax.scan(
+            simulate_target_to_prior, aux, jnp.arange(num_steps)[::-1]
+        )
+
+    trajectory, terminal_mask, fwd_log_prob, bwd_log_prob = per_step_output
+    return terminal_x, trajectory, fwd_log_prob, bwd_log_prob
+
+
 def rnd(
     key_gen,
     model_state,
@@ -249,11 +302,8 @@ def rnd(
     log_rewards: Array | None = None,
 ):
     if prior_to_target:
-        if initial_dist is None:  # pinned_brownian
-            input_states = jnp.zeros((batch_size, target.dim))
-        else:
-            key, key_gen = jax.random.split(key_gen)
-            input_states = initial_dist.sample(seed=key, sample_shape=(batch_size,))
+        key, key_gen = jax.random.split(key_gen)
+        input_states = initial_dist.sample(seed=key, sample_shape=(batch_size,))
     else:
         input_states = terminal_xs
 
@@ -290,14 +340,12 @@ def rnd(
 
     # We need to calculate log flow for the last continuous xs
     terminal_xs = jax.lax.stop_gradient(terminal_xs)
-    (_, _, terminal_log_fs) = jax.vmap(model_state.apply_fn, in_axes=(None, 0, 0))(
-        params, terminal_xs, log_rewards
-    )
+    (_, _, terminal_log_fs) = model_state.apply_fn(params, terminal_xs, log_rewards)
+
     # We need to calculate bwd_log_prob for the first continuous xs
     init_xs = jax.lax.stop_gradient(trajectories[:, 0])
-    (_, (bwd_clf_logits, *_), _) = jax.vmap(model_state.apply_fn, in_axes=(None, 0))(
-        params, init_xs
-    )
+    (_, (bwd_clf_logits, *_), _) = model_state.apply_fn(params, init_xs)
+
     fwd_log_probs = jnp.concatenate(
         [init_fwd_log_probs[:, None], fwd_log_probs], axis=1
     )
@@ -334,21 +382,23 @@ def rnd_eval(
     num_steps,
     prior_to_target=True,
     initial_dist: distrax.Distribution | None = None,
+    reference_process: Literal["learnable", "ula"] = "learnable",
     terminal_xs: Array | None = None,
     log_rewards: Array | None = None,
 ):
     if prior_to_target:
-        if initial_dist is None:  # pinned_brownian
-            input_states = jnp.zeros((batch_size, target.dim))
-        else:
-            key, key_gen = jax.random.split(key_gen)
-            input_states = initial_dist.sample(seed=key, sample_shape=(batch_size,))
+        key, key_gen = jax.random.split(key_gen)
+        input_states = initial_dist.sample(seed=key, sample_shape=(batch_size,))
     else:
         input_states = terminal_xs
 
     keys = jax.random.split(key_gen, num=batch_size)
+    per_sample_fn = {
+        "learnable": per_sample_rnd_eval,
+        "ula": per_sample_rnd_eval_ula,
+    }[reference_process]
     terminal_xs, trajectories, fwd_log_probs, bwd_log_probs = jax.vmap(
-        per_sample_rnd_eval,
+        per_sample_fn,
         in_axes=(0, None, None, 0, None, None, None, None, None),
     )(
         keys,

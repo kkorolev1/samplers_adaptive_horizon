@@ -13,14 +13,14 @@ import wandb
 
 from algorithms.common.diffusion_related.init_model import init_model
 from algorithms.common.eval_methods.stochastic_oc_methods import get_eval_fn
-from algorithms.gfn_non_acyclic_db.buffer import build_terminal_state_buffer
-from algorithms.gfn_non_acyclic_db.gfn_non_acyclic_db_rnd import rnd, rnd_eval, loss_fn
-from algorithms.gfn_non_acyclic_db.utils import get_invtemp
+from algorithms.gfn_non_acyclic.buffer import build_terminal_state_buffer
+from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import rnd, rnd_eval, loss_fn
+from algorithms.gfn_non_acyclic.utils import get_invtemp
 from eval.utils import extract_last_entry
 from utils.print_utils import print_results
 
 
-def gfn_non_acyclic_db_trainer(cfg, target, exp=None):
+def gfn_non_acyclic_trainer(cfg, target, exp=None):
     key_gen = jax.random.PRNGKey(cfg.seed)
 
     dim = target.dim
