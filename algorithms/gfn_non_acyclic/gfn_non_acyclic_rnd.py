@@ -212,6 +212,7 @@ def per_sample_rnd_with_term(
     num_steps,
     initial_dist,
     prior_to_target=True,
+    maybe_extra_step=True,
 ):
     def simulate_prior_to_target(state, per_step_input, force_stop=False):
         s, is_terminal, key_gen = state
@@ -343,22 +344,23 @@ def per_sample_rnd_with_term(
         )
         _, is_terminal_last, _ = aux
 
-        aux, per_step_output = jax.lax.cond(
-            ~is_terminal_last,
-            lambda _: concat_extra(
-                (aux, per_step_output),
-                jax.lax.scan(
-                    partial(simulate_prior_to_target, force_stop=True),
-                    aux,
-                    jnp.arange(num_steps, num_steps + 1),
+        if maybe_extra_step:
+            aux, per_step_output = jax.lax.cond(
+                ~is_terminal_last,
+                lambda _: concat_extra(
+                    (aux, per_step_output),
+                    jax.lax.scan(
+                        partial(simulate_prior_to_target, force_stop=True),
+                        aux,
+                        jnp.arange(num_steps, num_steps + 1),
+                    ),
                 ),
-            ),
-            lambda _: concat_extra(
-                (aux, per_step_output),
-                dummy_scan(aux, per_step_output),
-            ),
-            operand=None,
-        )
+                lambda _: concat_extra(
+                    (aux, per_step_output),
+                    dummy_scan(aux, per_step_output),
+                ),
+                operand=None,
+            )
 
         last_x, is_terminal_last, _ = aux
 
@@ -380,22 +382,23 @@ def per_sample_rnd_with_term(
 
         _, is_terminal_last, _ = aux
 
-        aux, per_step_output = jax.lax.cond(
-            ~is_terminal_last,
-            lambda _: concat_extra(
-                (aux, per_step_output),
-                jax.lax.scan(
-                    partial(simulate_prior_to_target, force_stop=True),
-                    aux,
-                    jnp.arange(num_steps, num_steps + 1),
+        if maybe_extra_step:
+            aux, per_step_output = jax.lax.cond(
+                ~is_terminal_last,
+                lambda _: concat_extra(
+                    (aux, per_step_output),
+                    jax.lax.scan(
+                        partial(simulate_target_to_prior, force_stop=True),
+                        aux,
+                        jnp.arange(num_steps, num_steps + 1),
+                    ),
                 ),
-            ),
-            lambda _: concat_extra(
-                (aux, per_step_output),
-                dummy_scan(aux, per_step_output),
-            ),
-            operand=None,
-        )
+                lambda _: concat_extra(
+                    (aux, per_step_output),
+                    dummy_scan(aux, per_step_output),
+                ),
+                operand=None,
+            )
 
         _, is_terminal_last, _ = aux
         trajectory, terminal_mask, fwd_log_prob, bwd_log_prob, log_f = per_step_output
@@ -490,6 +493,11 @@ def rnd_with_term(
             ],
             axis=1,
         )
+
+    jax.debug.print(
+        f"Max Length: {fwd_log_probs.shape}, {bwd_log_probs.shape}, {bwd_log_probs.shape}"
+    )
+    jax.debug.print(f"Mean Length: {trajectories_length.mean()}")
 
     log_pfs_over_pbs = fwd_log_probs - bwd_log_probs
     return (

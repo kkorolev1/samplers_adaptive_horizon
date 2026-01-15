@@ -13,6 +13,7 @@ init_std: ${target.gfn_non_acyclic.init_std}  # for ou
 init_invtemp: 1.
 logr_clip: -1e5
 reg_coef: ${target.gfn_non_acyclic.reg_coef}
+no_term: True
 
 # Learning rate scheduler
 lr_schedule:

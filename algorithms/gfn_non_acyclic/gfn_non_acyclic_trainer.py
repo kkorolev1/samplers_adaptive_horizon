@@ -60,7 +60,8 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
     model_state = init_model(key, dim, alg_cfg)
 
     rnd_partial_base = partial(
-        rnd_with_term,
+        # trajectories sampled without / with termination resp.
+        rnd_no_term if alg_cfg.no_term else rnd_with_term,
         aux_tuple=aux_tuple,
         target=target,
         num_steps=num_steps,

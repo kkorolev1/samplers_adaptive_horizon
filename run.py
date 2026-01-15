@@ -24,6 +24,9 @@ def main(cfg: DictConfig) -> None:
     # if not cfg.wandb.get("name"):
     #     cfg.wandb.name = run_name
 
+    print("JAX devices:", jax.devices())
+    print("JAX default backend:", jax.default_backend())
+
     if not cfg.visualize_samples:
         matplotlib.use("agg")
 
