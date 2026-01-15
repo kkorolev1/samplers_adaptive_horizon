@@ -14,7 +14,11 @@ import wandb
 from algorithms.common.diffusion_related.init_model import init_model
 from algorithms.common.eval_methods.stochastic_oc_methods import get_eval_fn
 from algorithms.gfn_non_acyclic.buffer import build_terminal_state_buffer
-from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import rnd, rnd_eval, loss_fn
+from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import (
+    rnd_no_term,
+    rnd_with_term,
+    loss_fn,
+)
 from algorithms.gfn_non_acyclic.utils import get_invtemp
 from eval.utils import extract_last_entry
 from utils.print_utils import print_results
@@ -56,14 +60,14 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
     model_state = init_model(key, dim, alg_cfg)
 
     rnd_partial_base = partial(
-        rnd,
+        rnd_with_term,
         aux_tuple=aux_tuple,
         target=target,
         num_steps=num_steps,
         initial_dist=initial_dist,
     )
     rnd_eval_partial_base = partial(
-        rnd_eval,
+        rnd_with_term,
         aux_tuple=aux_tuple,
         target=target,
         num_steps=1_000,
@@ -115,12 +119,12 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         # logZ_estimates = []
         for _ in range(buffer_cfg.prefill_steps):
             key, key_gen = jax.random.split(key_gen)
-            _, (trajectories, log_iws, log_rewards, losses) = loss_fwd_nograd_fn(
+            _, (samples, log_iws, log_rewards, losses) = loss_fwd_nograd_fn(
                 key, model_state, model_state.params
             )
             buffer_state = buffer.add(
                 buffer_state,
-                trajectories[:, -1],
+                samples,
                 log_iws,
                 log_rewards,
                 losses,
@@ -156,7 +160,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         if not use_buffer or it % (buffer_cfg.bwd_to_fwd_ratio + 1) == 0:
             # Sample from model
             key, key_gen = jax.random.split(key_gen)
-            grads, (trajectories, log_iws, log_rewards, losses) = loss_fwd_grad_fn(
+            grads, (samples, log_iws, log_rewards, losses) = loss_fwd_grad_fn(
                 key, model_state, model_state.params, invtemp=invtemp
             )
             model_state = model_state.apply_gradients(grads=grads)
@@ -165,7 +169,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
             if use_buffer:
                 buffer_state = buffer.add(
                     buffer_state,
-                    trajectories[:, -1],
+                    samples,
                     log_iws,
                     log_rewards,
                     losses,

@@ -55,11 +55,17 @@ def main(cfg: DictConfig) -> None:
         # if cfg.use_wandb:
         #     wandb.run.summary["error"] = None
         #     wandb.finish()
+        if cfg.use_cometml:
+            exp.log_other("error", None)
+            exp.end()
 
     except Exception as e:
         # if cfg.use_wandb:
         #     wandb.run.summary["error"] = str(e)
         #     wandb.finish(exit_code=1)
+        if cfg.use_cometml:
+            exp.log_other("error", str(e))
+            exp.end()
         reset_device_memory()
         raise e
 

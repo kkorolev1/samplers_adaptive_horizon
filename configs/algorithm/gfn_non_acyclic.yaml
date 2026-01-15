@@ -5,7 +5,7 @@ batch_size: ${target.all.batch_size}
 iters: ${target.all.iters}
 num_steps: ${target.gfn_non_acyclic.num_steps}
 grad_clip: 1.
-weight_decay: 1e-1
+weight_decay: 0.0
 loss_type: "tb"  # lv or tb
 init_logZ: ${target.gfn_non_acyclic.init_logZ}
 logZ_step_size: ${target.gfn_non_acyclic.logZ_step_size}
