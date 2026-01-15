@@ -342,9 +342,10 @@ def per_sample_rnd_with_term(
         return extra_aux, per_step_output
 
     def dummy_scan(aux, per_step_output):
+        get_arr_fn = lambda i: jnp.ones if i == 1 else jnp.zeros
         return aux, tuple(
-            jnp.zeros((1, x.shape[-1]) if x.ndim > 1 else (1,), dtype=x.dtype)
-            for x in per_step_output
+            get_arr_fn(i)((1, x.shape[-1]) if x.ndim > 1 else (1,), dtype=x.dtype)
+            for i, x in enumerate(per_step_output)
         )
 
     if prior_to_target:
