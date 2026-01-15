@@ -214,11 +214,24 @@ def per_sample_rnd_with_term(
     prior_to_target=True,
     maybe_extra_step=True,
 ):
+
+    @jax.checkpoint
+    def apply_fn_forward(params, s, log_reward, langevin):
+        return model_state.apply_fn(params, s, log_reward, langevin)
+
+    @jax.checkpoint
+    def apply_fn_backward(params, s_next):
+        return model_state.apply_fn(params, s_next)
+
+    @jax.checkpoint
+    def compute_target_grad(s):
+        return jax.value_and_grad(target.log_prob)(s)
+
     def simulate_prior_to_target(state, per_step_input, force_stop=False):
         s, is_terminal, key_gen = state
-        s = jax.lax.stop_gradient(s)
 
         def term_step(s, key_gen):
+            s = jax.lax.stop_gradient(s)
             next_state = (jnp.zeros_like(s), jnp.array(True), key_gen)
             per_step_output = (
                 s,
@@ -230,10 +243,9 @@ def per_sample_rnd_with_term(
             return next_state, per_step_output
 
         def non_term_step(s, key_gen):
-            log_reward, langevin = jax.lax.stop_gradient(
-                jax.value_and_grad(target.log_prob)(s)
-            )
-            ((fwd_clf_logits, fwd_mean, fwd_scale), _, log_f) = model_state.apply_fn(
+            s = jax.lax.stop_gradient(s)
+            log_reward, langevin = compute_target_grad(s)
+            ((fwd_clf_logits, fwd_mean, fwd_scale), _, log_f) = apply_fn_forward(
                 params, s, log_reward, langevin
             )
             key, key_gen = jax.random.split(key_gen)
@@ -248,7 +260,7 @@ def per_sample_rnd_with_term(
             fwd_log_prob = jnp.where(
                 is_terminal_next, nn.log_sigmoid(fwd_clf_logits), fwd_log_prob
             )
-            (_, (bwd_clf_logits, bwd_mean, bwd_scale), _) = model_state.apply_fn(
+            (_, (bwd_clf_logits, bwd_mean, bwd_scale), _) = apply_fn_backward(
                 params, s_next
             )
             bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jax.nn.log_sigmoid(
@@ -270,16 +282,17 @@ def per_sample_rnd_with_term(
 
     def simulate_target_to_prior(state, per_step_input, force_stop=False):
         s_next, is_terminal_next, key_gen = state
-        s_next = jax.lax.stop_gradient(s_next)
 
         def term_step(s_next, key_gen):
             # fmt: off
+            s_next = jax.lax.stop_gradient(s_next)
             next_state = (jnp.zeros_like(s_next), jnp.array(True), key_gen)
             per_step_output = (jnp.zeros_like(s_next), jnp.array(True), jnp.array(0.0), jnp.array(0.0), jnp.array(0.0))
             return next_state, per_step_output
 
         def non_term_step(s_next, key_gen):
-            (_, (bwd_clf_logits, bwd_mean, bwd_scale), _) = model_state.apply_fn(
+            s_next = jax.lax.stop_gradient(s_next)
+            (_, (bwd_clf_logits, bwd_mean, bwd_scale), _) = apply_fn_backward(
                 params, s_next
             )
             key, key_gen = jax.random.split(key_gen)
@@ -295,10 +308,8 @@ def per_sample_rnd_with_term(
                 is_terminal, nn.log_sigmoid(bwd_clf_logits), bwd_log_prob
             )
 
-            log_reward, langevin = jax.lax.stop_gradient(
-                jax.value_and_grad(target.log_prob)(s)
-            )
-            ((fwd_clf_logits, fwd_mean, fwd_scale), _, log_f) = model_state.apply_fn(
+            log_reward, langevin = compute_target_grad(s)
+            ((fwd_clf_logits, fwd_mean, fwd_scale), _, log_f) = apply_fn_forward(
                 params, s, log_reward, langevin
             )
 
@@ -494,10 +505,10 @@ def rnd_with_term(
             axis=1,
         )
 
-    jax.debug.print(
-        f"Max Length: {fwd_log_probs.shape}, {bwd_log_probs.shape}, {bwd_log_probs.shape}"
-    )
-    jax.debug.print(f"Mean Length: {trajectories_length.mean()}")
+    # jax.debug.print(
+    #     f"Max Length: {fwd_log_probs.shape}, {bwd_log_probs.shape}, {bwd_log_probs.shape}"
+    # )
+    # jax.debug.print(f"Mean Length: {trajectories_length.mean()}")
 
     log_pfs_over_pbs = fwd_log_probs - bwd_log_probs
     return (
