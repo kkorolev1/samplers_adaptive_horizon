@@ -215,122 +215,99 @@ def per_sample_rnd_with_term(
     maybe_extra_step=True,
 ):
 
-    @jax.checkpoint
+    # @jax.checkpoint
     def apply_fn_forward(params, s, log_reward, langevin):
         return model_state.apply_fn(params, s, log_reward, langevin)
 
-    @jax.checkpoint
+    # @jax.checkpoint
     def apply_fn_backward(params, s_next):
         return model_state.apply_fn(params, s_next)
 
-    @jax.checkpoint
+    # @jax.checkpoint
     def compute_target_grad(s):
         return jax.value_and_grad(target.log_prob)(s)
 
     def simulate_prior_to_target(state, per_step_input, force_stop=False):
         s, is_terminal, key_gen = state
+        s = jax.lax.stop_gradient(s)
 
-        def term_step(s, key_gen):
-            s = jax.lax.stop_gradient(s)
-            next_state = (jnp.zeros_like(s), jnp.array(True), key_gen)
-            per_step_output = (
-                s,
-                jnp.array(True),
-                jnp.array(0.0),
-                jnp.array(0.0),
-                jnp.array(0.0),
-            )
-            return next_state, per_step_output
-
-        def non_term_step(s, key_gen):
-            s = jax.lax.stop_gradient(s)
-            log_reward, langevin = compute_target_grad(s)
-            ((fwd_clf_logits, fwd_mean, fwd_scale), _, log_f) = apply_fn_forward(
-                params, s, log_reward, langevin
-            )
-            key, key_gen = jax.random.split(key_gen)
-            is_terminal_next = jax.random.bernoulli(key, nn.sigmoid(fwd_clf_logits))
-            if force_stop:
-                is_terminal_next = jnp.array(True)
-            s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
-            s_next = jax.lax.stop_gradient(s_next)
-            fwd_log_prob = log_prob_kernel(
-                s_next, fwd_mean, fwd_scale
-            ) + nn.log_sigmoid(-fwd_clf_logits)
-            fwd_log_prob = jnp.where(
-                is_terminal_next, nn.log_sigmoid(fwd_clf_logits), fwd_log_prob
-            )
-            (_, (bwd_clf_logits, bwd_mean, bwd_scale), _) = apply_fn_backward(
-                params, s_next
-            )
-            bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jax.nn.log_sigmoid(
-                -bwd_clf_logits
-            )
-            bwd_log_prob = jnp.where(is_terminal_next, log_reward, bwd_log_prob)
-
-            next_state = (s_next, is_terminal_next, key_gen)
-            per_step_output = (s, jnp.array(False), fwd_log_prob, bwd_log_prob, log_f)
-            return next_state, per_step_output
-
-        return jax.lax.cond(
-            is_terminal,
-            term_step,
-            non_term_step,
-            s,
-            key_gen,
+        log_reward, langevin = compute_target_grad(s)
+        ((fwd_clf_logits, fwd_mean, fwd_scale), _, log_f) = apply_fn_forward(
+            params, s, log_reward, langevin
         )
+        key, key_gen = jax.random.split(key_gen)
+        is_terminal_next = is_terminal | jax.random.bernoulli(
+            key, nn.sigmoid(fwd_clf_logits)
+        )
+        if force_stop:
+            is_terminal_next = jnp.array(True)
+        s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
+        s_next = jax.lax.stop_gradient(s_next)
+        fwd_log_prob = log_prob_kernel(s_next, fwd_mean, fwd_scale) + nn.log_sigmoid(
+            -fwd_clf_logits
+        )
+        fwd_log_prob = jnp.where(
+            is_terminal_next, nn.log_sigmoid(fwd_clf_logits), fwd_log_prob
+        )
+        fwd_log_prob = jnp.where(
+            is_terminal, jnp.zeros_like(fwd_clf_logits), fwd_log_prob
+        )
+        (_, (bwd_clf_logits, bwd_mean, bwd_scale), _) = apply_fn_backward(
+            params, s_next
+        )
+        bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jax.nn.log_sigmoid(
+            -bwd_clf_logits
+        )
+        bwd_log_prob = jnp.where(is_terminal_next, log_reward, bwd_log_prob)
+        bwd_log_prob = jnp.where(
+            is_terminal, jnp.zeros_like(bwd_log_prob), bwd_log_prob
+        )
+
+        next_state = (s_next, is_terminal_next, key_gen)
+        per_step_output = (s, is_terminal, fwd_log_prob, bwd_log_prob, log_f)
+        return next_state, per_step_output
 
     def simulate_target_to_prior(state, per_step_input, force_stop=False):
         s_next, is_terminal_next, key_gen = state
-
-        def term_step(s_next, key_gen):
-            # fmt: off
-            s_next = jax.lax.stop_gradient(s_next)
-            next_state = (jnp.zeros_like(s_next), jnp.array(True), key_gen)
-            per_step_output = (jnp.zeros_like(s_next), jnp.array(True), jnp.array(0.0), jnp.array(0.0), jnp.array(0.0))
-            return next_state, per_step_output
-
-        def non_term_step(s_next, key_gen):
-            s_next = jax.lax.stop_gradient(s_next)
-            (_, (bwd_clf_logits, bwd_mean, bwd_scale), _) = apply_fn_backward(
-                params, s_next
-            )
-            key, key_gen = jax.random.split(key_gen)
-            is_terminal = jax.random.bernoulli(key, nn.sigmoid(bwd_clf_logits))
-            if force_stop:
-                is_terminal = jnp.array(True)
-            s, key_gen = sample_kernel(key_gen, bwd_mean, bwd_scale)
-            s = jax.lax.stop_gradient(s)
-            bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + nn.log_sigmoid(
-                -bwd_clf_logits
-            )
-            bwd_log_prob = jnp.where(
-                is_terminal, nn.log_sigmoid(bwd_clf_logits), bwd_log_prob
-            )
-
-            log_reward, langevin = compute_target_grad(s)
-            ((fwd_clf_logits, fwd_mean, fwd_scale), _, log_f) = apply_fn_forward(
-                params, s, log_reward, langevin
-            )
-
-            fwd_log_prob = log_prob_kernel(
-                s_next, fwd_mean, fwd_scale
-            ) + jax.nn.log_sigmoid(-fwd_clf_logits)
-            fwd_log_prob = jnp.where(
-                is_terminal, initial_dist.log_prob(s_next), fwd_log_prob
-            )
-
-            next_state = (s, is_terminal, key_gen)
-            per_step_output = (s, is_terminal, fwd_log_prob, bwd_log_prob, log_f)
-            return next_state, per_step_output
-
-        return jax.lax.cond(
-            is_terminal_next,
-            term_step,
-            non_term_step,
-            s_next,
-            key_gen,
+        s_next = jax.lax.stop_gradient(s_next)
+        (_, (bwd_clf_logits, bwd_mean, bwd_scale), _) = apply_fn_backward(
+            params, s_next
         )
+        key, key_gen = jax.random.split(key_gen)
+        is_terminal = is_terminal_next | jax.random.bernoulli(
+            key, nn.sigmoid(bwd_clf_logits)
+        )
+        if force_stop:
+            is_terminal = jnp.array(True)
+        s, key_gen = sample_kernel(key_gen, bwd_mean, bwd_scale)
+        s = jax.lax.stop_gradient(s)
+        bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + nn.log_sigmoid(
+            -bwd_clf_logits
+        )
+        bwd_log_prob = jnp.where(
+            is_terminal, nn.log_sigmoid(bwd_clf_logits), bwd_log_prob
+        )
+        bwd_log_prob = jnp.where(
+            is_terminal_next, jnp.zeros_like(bwd_clf_logits), bwd_log_prob
+        )
+
+        log_reward, langevin = compute_target_grad(s)
+        ((fwd_clf_logits, fwd_mean, fwd_scale), _, log_f) = apply_fn_forward(
+            params, s, log_reward, langevin
+        )
+
+        fwd_log_prob = log_prob_kernel(
+            s_next, fwd_mean, fwd_scale
+        ) + jax.nn.log_sigmoid(-fwd_clf_logits)
+        fwd_log_prob = jnp.where(
+            is_terminal, initial_dist.log_prob(s_next), fwd_log_prob
+        )
+        fwd_log_prob = jnp.where(
+            is_terminal_next, jnp.zeros_like(fwd_log_prob), fwd_log_prob
+        )
+        next_state = (s, is_terminal, key_gen)
+        per_step_output = (s, is_terminal, fwd_log_prob, bwd_log_prob, log_f)
+        return next_state, per_step_output
 
     def concat_extra(scan_output, extra_step_scan_output):
         aux, per_step_output = scan_output
