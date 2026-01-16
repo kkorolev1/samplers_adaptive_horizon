@@ -263,6 +263,8 @@ def per_sample_rnd_with_term(
             is_terminal, jnp.zeros_like(bwd_log_prob), bwd_log_prob
         )
 
+        log_f = jnp.where(is_terminal, jnp.zeros_like(log_f), log_f)
+
         next_state = (s_next, is_terminal_next, key_gen)
         per_step_output = (s, is_terminal, fwd_log_prob, bwd_log_prob, log_f)
         return next_state, per_step_output
@@ -305,25 +307,21 @@ def per_sample_rnd_with_term(
         fwd_log_prob = jnp.where(
             is_terminal_next, jnp.zeros_like(fwd_log_prob), fwd_log_prob
         )
+
+        log_f = jnp.where(is_terminal, jnp.zeros_like(log_f), log_f)
+
         next_state = (s, is_terminal, key_gen)
         per_step_output = (s, is_terminal, fwd_log_prob, bwd_log_prob, log_f)
         return next_state, per_step_output
 
-    def concat_extra(scan_output, extra_step_scan_output):
+    def concat_extra(scan_output, extra_step_output):
         aux, per_step_output = scan_output
-        extra_aux, extra_per_step_output = extra_step_scan_output
+        extra_aux, extra_per_step_output = extra_step_output
         per_step_output = tuple(
-            jnp.concatenate([x, y], axis=0)
+            jnp.concatenate([x, jnp.expand_dims(y, axis=0)], axis=0)
             for x, y in zip(per_step_output, extra_per_step_output)
         )
         return extra_aux, per_step_output
-
-    def dummy_scan(aux, per_step_output):
-        get_arr_fn = lambda i: jnp.ones if i == 1 else jnp.zeros
-        return aux, tuple(
-            get_arr_fn(i)((1, x.shape[-1]) if x.ndim > 1 else (1,), dtype=x.dtype)
-            for i, x in enumerate(per_step_output)
-        )
 
     if prior_to_target:
         init_x = input_state
@@ -331,25 +329,11 @@ def per_sample_rnd_with_term(
         aux, per_step_output = jax.lax.scan(
             simulate_prior_to_target, aux, jnp.arange(num_steps)
         )
-        _, is_terminal_last, _ = aux
 
-        if maybe_extra_step:
-            aux, per_step_output = jax.lax.cond(
-                ~is_terminal_last,
-                lambda _: concat_extra(
-                    (aux, per_step_output),
-                    jax.lax.scan(
-                        partial(simulate_prior_to_target, force_stop=True),
-                        aux,
-                        jnp.arange(num_steps, num_steps + 1),
-                    ),
-                ),
-                lambda _: concat_extra(
-                    (aux, per_step_output),
-                    dummy_scan(aux, per_step_output),
-                ),
-                operand=None,
-            )
+        aux, per_step_output = concat_extra(
+            (aux, per_step_output),
+            simulate_prior_to_target(aux, jnp.array(num_steps), force_stop=True),
+        )
 
         last_x, is_terminal_last, _ = aux
 
@@ -369,31 +353,19 @@ def per_sample_rnd_with_term(
             simulate_target_to_prior, aux, jnp.arange(num_steps)
         )
 
-        _, is_terminal_last, _ = aux
-
-        if maybe_extra_step:
-            aux, per_step_output = jax.lax.cond(
-                ~is_terminal_last,
-                lambda _: concat_extra(
-                    (aux, per_step_output),
-                    jax.lax.scan(
-                        partial(simulate_target_to_prior, force_stop=True),
-                        aux,
-                        jnp.arange(num_steps, num_steps + 1),
-                    ),
-                ),
-                lambda _: concat_extra(
-                    (aux, per_step_output),
-                    dummy_scan(aux, per_step_output),
-                ),
-                operand=None,
-            )
-
-        _, is_terminal_last, _ = aux
-        trajectory, terminal_mask, fwd_log_prob, bwd_log_prob, log_f = per_step_output
-        terminal_mask = jnp.concatenate(
-            [terminal_mask, jnp.expand_dims(is_terminal_last, axis=0)], axis=0
+        aux, per_step_output = concat_extra(
+            (aux, per_step_output),
+            simulate_target_to_prior(aux, jnp.array(num_steps), force_stop=True),
         )
+
+        _, terminal_mask, fwd_log_prob, bwd_log_prob, log_f = per_step_output
+
+        # starting from x=s3
+        # traj=[s2,s1,s0]
+        # term_mask=[0,0,1]
+        # l = jnp.where(~term_mask).max() + 2 = [0,1,-].max() + 2 = 3
+        # log_f = [log f(s2), log f(s1), log f(s0)]
+        # log_f[l-1] should be replaced by logZ
         trajectory_length = jnp.where(~terminal_mask, size=num_steps + 1)[0].max() + 2
     return terminal_x, trajectory_length, fwd_log_prob, bwd_log_prob, log_f
 
