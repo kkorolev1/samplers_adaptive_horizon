@@ -13,9 +13,7 @@ import wandb
 
 from algorithms.common.diffusion_related.init_model import init_model
 from algorithms.common.eval_methods.stochastic_oc_methods import get_eval_fn
-from algorithms.gfn_non_acyclic.buffer import build_terminal_state_buffer
-from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import rnd, rnd_eval, loss_fn
-from algorithms.gfn_non_acyclic.utils import get_invtemp
+from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import rnd_ula
 from eval.utils import extract_last_entry
 from utils.print_utils import print_results
 
@@ -33,19 +31,18 @@ def gfn_non_acyclic_ula(cfg, target, exp=None):
     initial_dist = distrax.MultivariateNormalDiag(
         jnp.zeros(dim), jnp.ones(dim) * alg_cfg.init_std
     )
-    aux_tuple = alg_cfg.step_size
+    aux_tuple = (alg_cfg.model.gamma,)
 
     # Initialize the model
     key, key_gen = jax.random.split(key_gen)
     model_state = init_model(key, dim, alg_cfg)
 
     rnd_eval_partial_base = partial(
-        rnd_eval,
+        rnd_ula,
         aux_tuple=aux_tuple,
         target=target,
         num_steps=num_steps,
         initial_dist=initial_dist,
-        reference_process="ula",
     )
 
     ### Prepare eval function

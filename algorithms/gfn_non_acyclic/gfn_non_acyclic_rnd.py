@@ -102,20 +102,6 @@ def per_sample_rnd_no_term(
     return terminal_x, trajectory, fwd_log_prob, bwd_log_prob, log_f
 
 
-def per_sample_rnd_ula(
-    key,
-    model_state,
-    params,
-    input_state: Array,
-    aux_tuple,
-    target,
-    num_steps,
-    initial_dist,
-    prior_to_target=True,
-):
-    pass
-
-
 def rnd_no_term(
     key_gen,
     model_state,
@@ -212,7 +198,6 @@ def per_sample_rnd_with_term(
     num_steps,
     initial_dist,
     prior_to_target=True,
-    maybe_extra_step=True,
 ):
 
     # @jax.checkpoint
@@ -510,4 +495,79 @@ def loss_fn(
         jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),  # log(pb(s'->s)/pf(s->s'))
         -terminal_costs,  # log_rewards
         jax.lax.stop_gradient(db_losses),
+    )
+
+
+def per_sample_rnd_ula(
+    key,
+    model_state,
+    params,
+    input_state: Array,
+    aux_tuple,
+    target,
+    num_steps,
+    prior_to_target=True,
+):
+    (gamma,) = aux_tuple
+
+    def simulate_prior_to_target(state, per_step_input):
+        s, key_gen = state
+        s = jax.lax.stop_gradient(s)
+        langevin = jax.lax.stop_gradient(jax.grad(target.log_prob)(s))
+        fwd_mean = s + langevin * gamma
+        fwd_scale = jnp.sqrt(2 * gamma)
+        s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
+        # Return next state and per-step output
+        next_state = (s_next, key_gen)
+        per_step_output = (s,)
+        return next_state, per_step_output
+
+    init_x = input_state
+    aux = (init_x, key)
+    aux, per_step_output = jax.lax.scan(
+        simulate_prior_to_target, aux, jnp.arange(num_steps)
+    )
+    terminal_x, _ = aux
+    return terminal_x
+
+
+def rnd_ula(
+    key_gen,
+    model_state,
+    params,
+    batch_size,
+    aux_tuple,
+    target,
+    num_steps,
+    prior_to_target=True,
+    initial_dist: distrax.Distribution | None = None,
+    terminal_xs: Array | None = None,
+    log_rewards: Array | None = None,
+):
+    key, key_gen = jax.random.split(key_gen)
+    input_states = initial_dist.sample(seed=key, sample_shape=(batch_size,))
+
+    keys = jax.random.split(key_gen, num=batch_size)
+    terminal_xs = jax.vmap(
+        per_sample_rnd_ula,
+        in_axes=(0, None, None, 0, None, None, None, None),
+    )(
+        keys,
+        model_state,
+        params,
+        input_states,
+        aux_tuple,
+        target,
+        num_steps,
+        prior_to_target,
+    )
+    dummy_array = target.log_prob(terminal_xs)
+    return (
+        terminal_xs,
+        jnp.zeros_like(dummy_array),  # running costs
+        jnp.zeros_like(dummy_array),  # stochastic costs
+        jnp.zeros_like(dummy_array),  # terminal costs
+        num_steps * jnp.ones((batch_size,)),
+        jnp.zeros_like(dummy_array),
+        jnp.zeros_like(dummy_array),
     )
