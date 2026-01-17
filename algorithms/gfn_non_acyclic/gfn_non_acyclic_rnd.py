@@ -500,27 +500,53 @@ def loss_fn(
     )
 
 
-def per_sample_rnd_ula(
+def get_step_fn(aux_tuple, target, name):
+    def compute_log_reward_and_langevin(s):
+        return jax.lax.stop_gradient(jax.value_and_grad(target.log_prob)(s))
+
+    def ula_step(s, key_gen):
+        (gamma,) = aux_tuple
+        langevin = jax.lax.stop_gradient(jax.grad(target.log_prob)(s))
+        fwd_mean = s + langevin * gamma
+        fwd_scale = jnp.sqrt(2 * gamma)
+        return sample_kernel(key_gen, fwd_mean, fwd_scale)
+
+    def mala_step(s, key_gen):
+        (gamma,) = aux_tuple
+
+        log_reward, langevin = compute_log_reward_and_langevin(s)
+        fwd_mean = s + langevin * gamma
+        fwd_scale = jnp.sqrt(2 * gamma)
+        s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
+
+        log_reward_next, langevin_next = compute_log_reward_and_langevin(s_next)
+        fwd_log_prob = log_prob_kernel(s_next, fwd_mean, fwd_scale)
+
+        bwd_mean = s_next + langevin_next * gamma
+        bwd_scale = jnp.sqrt(2 * gamma)
+        bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale)
+
+        log_accept = log_reward_next + bwd_log_prob - log_reward - fwd_log_prob
+        key, key_gen = jax.random.split(key_gen)
+        accept_mask = jnp.log(jax.random.uniform(key)) < log_accept
+
+        new_state = jnp.where(accept_mask, s_next, s)
+        return new_state, key_gen
+
+    return {"ula": ula_step, "mala": mala_step}[name]
+
+
+def per_sample_rnd_cont(
     key,
     model_state,
     params,
     input_state: Array,
-    aux_tuple,
-    target,
+    step_fn,
     num_steps,
-    prior_to_target=True,
 ):
-    (gamma,) = aux_tuple
-
     def simulate_prior_to_target(state, per_step_input):
         s, key_gen = state
-        s = jax.lax.stop_gradient(s)
-        langevin = jax.lax.stop_gradient(jax.grad(target.log_prob)(s))
-        fwd_mean = s + langevin * gamma
-        fwd_scale = jnp.sqrt(2 * gamma)
-        s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
-        # Return next state and per-step output
-        next_state = (s_next, key_gen)
+        next_state = step_fn(s, key_gen)
         per_step_output = (s,)
         return next_state, per_step_output
 
@@ -533,7 +559,7 @@ def per_sample_rnd_ula(
     return terminal_x
 
 
-def rnd_ula(
+def rnd_cont(
     key_gen,
     model_state,
     params,
@@ -541,6 +567,7 @@ def rnd_ula(
     aux_tuple,
     target,
     num_steps,
+    step_name,
     prior_to_target=True,
     initial_dist: distrax.Distribution | None = None,
     terminal_xs: Array | None = None,
@@ -549,19 +576,19 @@ def rnd_ula(
     key, key_gen = jax.random.split(key_gen)
     input_states = initial_dist.sample(seed=key, sample_shape=(batch_size,))
 
+    step_fn = get_step_fn(aux_tuple, target, step_name)
+
     keys = jax.random.split(key_gen, num=batch_size)
     terminal_xs = jax.vmap(
-        per_sample_rnd_ula,
-        in_axes=(0, None, None, 0, None, None, None, None),
+        per_sample_rnd_cont,
+        in_axes=(0, None, None, 0, None, None),
     )(
         keys,
         model_state,
         params,
         input_states,
-        aux_tuple,
-        target,
+        step_fn,
         num_steps,
-        prior_to_target,
     )
     dummy_array = target.log_prob(terminal_xs)
     return (

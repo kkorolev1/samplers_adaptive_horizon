@@ -1,5 +1,5 @@
 # Generative Flow Networks (GFN) with Trajectory Balance (TB) loss
-name: gfn_non_acyclic_ula
+name: gfn_non_acyclic_baseline
 step_size: ${target.gfn_non_acyclic.step_size}
 batch_size: ${target.all.batch_size}
 iters: ${target.all.iters}
@@ -12,6 +12,7 @@ logZ_step_size: ${target.gfn_non_acyclic.logZ_step_size}
 init_std: ${target.gfn_non_acyclic.init_std}  # for ou
 init_invtemp: 1.
 logr_clip: -1e5
+step_name: "ula"
 
 # Learning rate scheduler
 lr_schedule:

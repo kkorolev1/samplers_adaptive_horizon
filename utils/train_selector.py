@@ -128,11 +128,11 @@ def get_train_fn(alg_name):
         )
 
         return gfn_non_acyclic_trainer
-    elif alg_name == "gfn_non_acyclic_ula":
-        from algorithms.gfn_non_acyclic.gfn_non_acyclic_ula import (
-            gfn_non_acyclic_ula,
+    elif alg_name == "gfn_non_acyclic_baseline":
+        from algorithms.gfn_non_acyclic.gfn_non_acyclic_baseline import (
+            gfn_non_acyclic_baseline,
         )
 
-        return gfn_non_acyclic_ula
+        return gfn_non_acyclic_baseline
     else:
         raise ValueError(f"No algorithm named {alg_name}.")

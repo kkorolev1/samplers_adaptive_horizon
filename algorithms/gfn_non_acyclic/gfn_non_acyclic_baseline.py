@@ -13,12 +13,12 @@ import wandb
 
 from algorithms.common.diffusion_related.init_model import init_model
 from algorithms.common.eval_methods.stochastic_oc_methods import get_eval_fn
-from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import rnd_ula
+from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import rnd_cont
 from eval.utils import extract_last_entry
 from utils.print_utils import print_results
 
 
-def gfn_non_acyclic_ula(cfg, target, exp=None):
+def gfn_non_acyclic_baseline(cfg, target, exp=None):
     key_gen = jax.random.PRNGKey(cfg.seed)
 
     dim = target.dim
@@ -38,10 +38,11 @@ def gfn_non_acyclic_ula(cfg, target, exp=None):
     model_state = init_model(key, dim, alg_cfg)
 
     rnd_eval_partial_base = partial(
-        rnd_ula,
+        rnd_cont,
         aux_tuple=aux_tuple,
         target=target,
         num_steps=num_steps,
+        step_name=alg_cfg.step_name,
         initial_dist=initial_dist,
     )
 
