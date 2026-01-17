@@ -14,6 +14,7 @@ init_invtemp: 1.
 logr_clip: -1e5
 reg_coef: ${target.gfn_non_acyclic.reg_coef}
 no_term: True
+eval_max_steps: 1000
 
 # Learning rate scheduler
 lr_schedule:

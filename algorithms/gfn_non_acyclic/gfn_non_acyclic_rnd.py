@@ -183,7 +183,8 @@ def rnd_no_term(
     log_fs = log_fs.at[:, 0].set(logZ)
 
     log_pfs_over_pbs = fwd_log_probs - bwd_log_probs
-    trajectories_length = num_steps * jnp.ones((batch_size,), dtype=int)
+    trajectories_length = (num_steps + 1) * jnp.ones((batch_size,), dtype=int)
+
     return (
         terminal_xs,
         log_pfs_over_pbs.sum(1),  # running costs
@@ -378,32 +379,7 @@ def rnd_with_term(
         terminal_xs = trajectories[
             jnp.arange(trajectories.shape[0]), trajectories_length - 1
         ]
-    else:
-        # fmt: off
-        terminals_mask = jnp.concatenate([jnp.ones((terminals_mask.shape[0], 1), dtype=terminals_mask.dtype), terminals_mask[:, :-1]], axis=1)
 
-        trajectories_length = (~terminals_mask).sum(axis=1)
-
-        fwd_log_probs = fwd_log_probs[:, ::-1]
-        bwd_log_probs = bwd_log_probs[:, ::-1]
-        log_fs = log_fs[:, ::-1]
-
-        indices = (~terminals_mask).argsort(axis=1, descending=True, stable=True)
-        fwd_log_probs = jnp.take_along_axis(fwd_log_probs, indices, axis=1)
-        bwd_log_probs = jnp.take_along_axis(bwd_log_probs, indices, axis=1)
-        log_fs = jnp.take_along_axis(log_fs, indices, axis=1)
-
-        terminal_xs = jax.lax.stop_gradient(terminal_xs)
-        (_, _, terminal_log_fs) = model_state.apply_fn(params, terminal_xs, log_rewards)
-        log_fs.at[jnp.arange(log_fs.shape[0]), trajectories_length - 1].set(
-            terminal_log_fs
-        )
-
-    if log_rewards is None:
-        log_rewards = target.log_prob(terminal_xs)
-
-    logZ = params["params"]["logZ"]
-    if prior_to_target:
         # We need to add fwd/bwd_log_prob for the first continuous xs
         # fmt: off
         init_xs = jax.lax.stop_gradient(input_states)
@@ -418,22 +394,50 @@ def rnd_with_term(
         )
         log_fs = jnp.concatenate(
             [
-                jnp.zeros_like(log_rewards)[:, None],  # set to logZ later
+                jnp.zeros_like(init_fwd_log_probs)[:, None],  # set to logZ later
                 log_fs,
-                jnp.zeros_like(log_rewards)[:, None], # reward is already in bwd_log_probs
+                jnp.zeros_like(init_fwd_log_probs)[:, None], # reward is already in bwd_log_probs
             ],
             axis=1,
         )
     else:
         # fmt: off
+        terminals_mask = jnp.concatenate([jnp.zeros((terminals_mask.shape[0], 1), dtype=terminals_mask.dtype), terminals_mask[:, :-1]], axis=1)
+
+        trajectories_length = (~terminals_mask).sum(axis=1)
+
+        terminals_mask = terminals_mask[:, ::-1]
+        fwd_log_probs = fwd_log_probs[:, ::-1]
+        bwd_log_probs = bwd_log_probs[:, ::-1]
+        log_fs = log_fs[:, ::-1]
+
+        indices = (~terminals_mask).argsort(axis=1, descending=True, stable=True)
+        fwd_log_probs = jnp.take_along_axis(fwd_log_probs, indices, axis=1)
+        bwd_log_probs = jnp.take_along_axis(bwd_log_probs, indices, axis=1)
+        log_fs = jnp.take_along_axis(log_fs, indices, axis=1)
+
+        if log_rewards is None:
+            log_rewards = target.log_prob(terminal_xs)
+
         log_fs = jnp.concatenate(
             [
                 log_fs,
-                jnp.zeros_like(log_rewards)[:, None], # reward is already in bwd_log_probs
+                jnp.zeros_like(log_rewards)[:, None],
             ],
             axis=1,
         )
+
+        terminal_xs = jax.lax.stop_gradient(terminal_xs)
+        (_, _, terminal_log_fs) = model_state.apply_fn(params, terminal_xs, log_rewards)
+        log_fs = log_fs.at[jnp.arange(log_fs.shape[0]), trajectories_length].set(
+            terminal_log_fs
+        )
+
+    logZ = params["params"]["logZ"]
     log_fs = log_fs.at[:, 0].set(logZ)
+
+    if log_rewards is None:
+        log_rewards = target.log_prob(terminal_xs)
 
     # jax.debug.print(
     #     f"Max Length: {fwd_log_probs.shape}, {bwd_log_probs.shape}, {bwd_log_probs.shape}"

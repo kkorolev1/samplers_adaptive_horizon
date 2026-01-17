@@ -71,7 +71,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         rnd_with_term,
         aux_tuple=aux_tuple,
         target=target,
-        num_steps=1_000,
+        num_steps=alg_cfg.eval_max_steps,
         initial_dist=initial_dist,
     )
     loss_fn_base = partial(loss_fn, logr_clip=alg_cfg.logr_clip, reg_coef=reg_coef)
