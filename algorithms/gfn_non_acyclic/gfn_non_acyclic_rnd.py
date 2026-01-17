@@ -590,13 +590,13 @@ def rnd_cont(
         step_fn,
         num_steps,
     )
-    dummy_array = target.log_prob(terminal_xs)
+    log_rewards = target.log_prob(terminal_xs)
     return (
         terminal_xs,
-        jnp.zeros_like(dummy_array),  # running costs
-        jnp.zeros_like(dummy_array),  # stochastic costs
-        jnp.zeros_like(dummy_array),  # terminal costs
+        jnp.zeros_like(log_rewards),  # running costs
+        jnp.zeros_like(log_rewards),  # stochastic costs
+        -log_rewards,  # terminal costs
         num_steps * jnp.ones((batch_size,)),
-        jnp.zeros_like(dummy_array),
-        jnp.zeros_like(dummy_array),
+        jnp.zeros_like(log_rewards),
+        jnp.zeros_like(log_rewards),
     )

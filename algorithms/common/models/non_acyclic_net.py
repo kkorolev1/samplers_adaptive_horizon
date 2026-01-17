@@ -123,7 +123,7 @@ class NonAcyclicNet(nn.Module):
                 axis=-1,
             )
             # fmt: off
-            fwd_mean = input_array + (fwd_mean_corr + fwd_lgv_scale * lgv_term) * self.gamma
+            fwd_mean = input_array + (fwd_mean_corr + (1 + fwd_lgv_scale) * lgv_term) * self.gamma
             fwd_scale = jnp.sqrt(
                 2 * jnp.exp(self.fwd_log_var_range * nn.tanh(fwd_scale_corr)) * self.gamma
             )

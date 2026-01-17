@@ -17,6 +17,7 @@ from algorithms.gfn_non_acyclic.buffer import build_terminal_state_buffer
 from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import (
     rnd_no_term,
     rnd_with_term,
+    rnd_cont,
     loss_fn,
 )
 from algorithms.gfn_non_acyclic.utils import get_invtemp
@@ -65,6 +66,16 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         aux_tuple=aux_tuple,
         target=target,
         num_steps=num_steps,
+        initial_dist=initial_dist,
+    )
+    local_search_cfg = alg_cfg.local_search
+    rnd_local_search_partial_base = partial(
+        rnd_cont,
+        batch_size=batch_size,
+        aux_tuple=(local_search_cfg.gamma,),
+        target=target,
+        num_steps=local_search_cfg.num_steps,
+        step_name="mala",
         initial_dist=initial_dist,
     )
     rnd_eval_partial_base = partial(
@@ -151,6 +162,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         return jnp.sqrt(sum([jnp.sum(jnp.square(jnp.asarray(x))) for x in leaves]))
 
     grads = None
+    off_policy_iters = 0
     ### Training phase
     for it in range(alg_cfg.iters):
         invtemp = get_invtemp(
@@ -182,6 +194,21 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
 
         # Off-policy training with buffer samples
         else:
+            if local_search_cfg.use and off_policy_iters % local_search_cfg.cycle == 0:
+                key, key_gen = jax.random.split(key_gen)
+                samples, _, _, terminal_costs, *_ = rnd_local_search_partial_base(
+                    key,
+                    model_state,
+                    model_state.params,
+                )
+                buffer_state = buffer.add(
+                    buffer_state,
+                    samples,
+                    jnp.zeros_like(terminal_costs),
+                    -terminal_costs,  # log_rewards
+                    jnp.zeros_like(terminal_costs),
+                )
+
             # Sample terminal states from buffer
             key, key_gen = jax.random.split(key_gen)
             samples, log_rewards, indices = buffer.sample(buffer_state, key, batch_size)
@@ -207,6 +234,8 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
                     log_rewards,
                     losses,
                 )
+            off_policy_iters += 1
+
         if cfg.use_cometml:
             params_norm = tree_l2_norm(
                 model_state.params.get("params", model_state.params)

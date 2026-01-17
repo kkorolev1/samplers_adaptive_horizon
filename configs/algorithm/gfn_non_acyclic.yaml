@@ -42,3 +42,9 @@ buffer:
   prefill_steps: 100  # collect `prefill_steps` batches before starting training
   bwd_to_fwd_ratio: 2  # number of bwd steps per fwd step
   update_score: False
+
+local_search:
+  use: True
+  cycle: 100
+  gamma: 1e-3
+  num_steps: 300
