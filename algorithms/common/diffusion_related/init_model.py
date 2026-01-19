@@ -4,7 +4,7 @@ import optax
 from flax.training.train_state import TrainState
 from flax.traverse_util import path_aware_map
 
-from algorithms.common.models.pisgrad_net import PISGRADNet
+# from algorithms.common.models.pisgrad_net import PISGRADNet
 from algorithms.common.models.non_acyclic_net import NonAcyclicNet
 
 
@@ -69,9 +69,17 @@ def init_model(key, dim, alg_cfg) -> TrainState:
         jnp.ones([alg_cfg.batch_size, dim]),
         jnp.ones([alg_cfg.batch_size,]),
         jnp.ones([alg_cfg.batch_size, dim]),
-        # jnp.ones([alg_cfg.batch_size, 1]),
-        # jnp.ones([alg_cfg.batch_size, dim]),
+        predict_fwd=True,
     )
+    if not model.shared_model:
+        key, key_gen = jax.random.split(key)
+        params_bwd = model.init(
+            key_gen,
+            jnp.ones([alg_cfg.batch_size, dim]),
+            predict_bwd=True,
+        )
+        params["params"] = {**params["params"], **params_bwd["params"]}
+        
 
     if "gfn" not in alg_cfg.name:
         optimizer = optax.chain(

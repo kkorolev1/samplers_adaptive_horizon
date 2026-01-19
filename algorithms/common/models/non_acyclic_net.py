@@ -2,69 +2,6 @@ import jax.numpy as jnp
 from flax import linen as nn
 
 
-class StateTimeEncoder(nn.Module):
-    num_layers: int = 2
-    num_hid: int = 64
-    zero_init: bool = False
-
-    def setup(self):
-        if self.zero_init:
-            last_layer = [
-                nn.Dense(
-                    self.parent.dim,
-                    kernel_init=nn.initializers.zeros_init(),
-                    bias_init=nn.initializers.zeros_init(),
-                )
-            ]
-        else:
-            # last_layer = [nn.Dense(self.parent.dim)]
-            last_layer = [
-                nn.Dense(
-                    self.parent.dim,
-                    kernel_init=nn.initializers.normal(stddev=1e-7),
-                    bias_init=nn.initializers.zeros_init(),
-                )
-            ]
-
-        self.state_time_net = [
-            nn.Sequential([nn.Dense(self.num_hid), nn.gelu])
-            for _ in range(self.num_layers)
-        ] + last_layer
-
-    def __call__(self, extended_input):
-        for layer in self.state_time_net:
-            extended_input = layer(extended_input)
-        return extended_input
-
-
-class LangevinScaleNet(nn.Module):
-    num_layers: int = 2
-    num_hid: int = 64
-    lgv_per_dim: bool = False
-
-    def setup(self):
-        self.time_coder_grad = (
-            [nn.Dense(self.num_hid)]
-            + [
-                nn.Sequential([nn.gelu, nn.Dense(self.num_hid)])
-                for _ in range(self.num_layers)
-            ]
-            + [
-                nn.gelu,
-                nn.Dense(
-                    self.parent.dim if self.lgv_per_dim else 1,
-                    kernel_init=nn.initializers.zeros_init(),
-                    bias_init=nn.initializers.zeros_init(),
-                ),
-            ]
-        )
-
-    def __call__(self, time_array_emb):
-        for layer in self.time_coder_grad:
-            time_array_emb = layer(time_array_emb)
-        return time_array_emb
-
-
 class NonAcyclicNet(nn.Module):
     dim: int
 
@@ -79,78 +16,130 @@ class NonAcyclicNet(nn.Module):
     gamma: float = 1.0
     fwd_log_var_range: float = 4.0
     bwd_log_var_range: float = 4.0
-    learn_fwd: bool = False
+    learn_fwd_corrections: bool = False
+    shared_model: bool = False
 
     def setup(self):
-        self.fwd_pred_dim = 1 + 3 * self.dim if self.learn_fwd else 1
+        self.fwd_pred_dim = 1 + 3 * self.dim if self.learn_fwd_corrections else 1
         self.bwd_pred_dim = 1 + 2 * self.dim
-        self.state_net = nn.Sequential(
-            [
-                nn.Sequential([nn.Dense(self.num_hid), nn.gelu])
-                for _ in range(self.num_layers)
-            ]
-            + [
-                nn.Dense(
-                    self.fwd_pred_dim + self.bwd_pred_dim,
-                    kernel_init=nn.initializers.constant(1e-8),
-                    bias_init=nn.initializers.zeros_init(),
-                )
-            ]
-        )
-
-    def __call__(self, input_array, log_reward=None, lgv_term=None):
-        model_output = self.state_net(input_array)
-        d = input_array.shape[-1]
-
-        # if we don't want to calculate fwd
-        if lgv_term is None:
-            lgv_term = jnp.zeros_like(input_array)
+        if self.shared_model:
+            self.state_net = nn.Sequential(
+                [
+                    nn.Sequential([nn.Dense(self.num_hid), nn.gelu])
+                    for _ in range(self.num_layers)
+                ]
+                + [
+                    nn.Dense(
+                        self.fwd_pred_dim + self.bwd_pred_dim,
+                        kernel_init=nn.initializers.constant(1e-8),
+                        bias_init=nn.initializers.zeros_init(),
+                    )
+                ]
+            )
         else:
-            lgv_term = jnp.clip(lgv_term, -self.inner_clip, self.inner_clip)
+            self.fwd_state_net = nn.Sequential(
+                [
+                    nn.Sequential([nn.Dense(self.num_hid), nn.gelu])
+                    for _ in range(self.num_layers)
+                ]
+                + [
+                    nn.Dense(
+                        self.fwd_pred_dim,
+                        kernel_init=nn.initializers.constant(1e-8),
+                        bias_init=nn.initializers.zeros_init(),
+                    )
+                ]
+            )
+            self.bwd_state_net = nn.Sequential(
+                [
+                    nn.Sequential([nn.Dense(self.num_hid), nn.gelu])
+                    for _ in range(self.num_layers)
+                ]
+                + [
+                    nn.Dense(
+                        self.bwd_pred_dim,
+                        kernel_init=nn.initializers.constant(1e-8),
+                        bias_init=nn.initializers.zeros_init(),
+                    )
+                ]
+            )
 
-        if self.learn_fwd:
+    def _parse_fwd_pred(self, s, model_output, lgv_term):
+        if self.shared_model:
+            model_output, _ = jnp.split(model_output, [self.fwd_pred_dim])
+        if self.learn_fwd_corrections:
             (
                 fwd_clf_logits,
                 fwd_mean_corr,
                 fwd_lgv_scale,
                 fwd_scale_corr,
-                bwd_clf_logits,
-                bwd_mean_corr,
-                bwd_scale_corr,
             ) = jnp.split(
                 model_output,
-                [1, 1 + d, 1 + 2 * d, 1 + 3 * d, 2 + 3 * d, 2 + 4 * d],
+                [1, 1 + self.dim, 1 + 2 * self.dim],
                 axis=-1,
             )
             # fmt: off
-            fwd_mean = input_array + (fwd_mean_corr + (1 + fwd_lgv_scale) * lgv_term) * self.gamma
+            fwd_mean = s + (fwd_mean_corr + (1 + fwd_lgv_scale) * lgv_term) * self.gamma
             fwd_scale = jnp.sqrt(
                 2 * jnp.exp(self.fwd_log_var_range * nn.tanh(fwd_scale_corr)) * self.gamma
             )
         else:
-            fwd_clf_logits, bwd_clf_logits, bwd_mean_corr, bwd_scale_corr = jnp.split(
-                model_output, [1, 2, 2 + d], axis=-1
-            )
-            fwd_mean = input_array + lgv_term * self.gamma
+            fwd_clf_logits = model_output
+            fwd_mean = s + lgv_term * self.gamma
             fwd_scale = jnp.sqrt(2 * self.gamma)
 
         fwd_mean = jnp.clip(fwd_mean, -self.outer_clip, self.outer_clip)
         fwd_clf_logits = fwd_clf_logits.squeeze(-1)
-        bwd_clf_logits = bwd_clf_logits.squeeze(-1)
 
-        # fmt: off
-        bwd_mean = input_array - nn.softplus(bwd_mean_corr) * input_array * self.gamma
+        return fwd_clf_logits, fwd_mean, fwd_scale
+
+    def _parse_bwd_pred(self, s, model_output):
+        if self.shared_model:
+            _, model_output = jnp.split(model_output, [self.fwd_pred_dim])
+
+        (
+            bwd_clf_logits,
+            bwd_mean_corr,
+            bwd_scale_corr,
+        ) = jnp.split(
+            model_output,
+            [1, 1 + self.dim],
+            axis=-1,
+        )
+        bwd_mean = s - nn.softplus(bwd_mean_corr) * s * self.gamma
         bwd_mean = jnp.clip(bwd_mean, -self.outer_clip, self.outer_clip)
         bwd_scale = jnp.sqrt(
             jnp.exp(self.bwd_log_var_range * nn.tanh(bwd_scale_corr)) * self.gamma
         )
+        bwd_clf_logits = bwd_clf_logits.squeeze(-1)
 
-        log_flow = jnp.array(0.0)
-        # if we want to calculate log flow
-        if log_reward is not None:
-            log_flow = log_reward - nn.log_sigmoid(fwd_clf_logits)
-        return (
-            (fwd_clf_logits, fwd_mean, fwd_scale),
-            (bwd_clf_logits, bwd_mean, bwd_scale),
-            log_flow,
-        )
+        return bwd_clf_logits, bwd_mean, bwd_scale
+
+    def __call__(
+        self,
+        s,
+        log_reward=None,
+        lgv_term=None,
+        predict_fwd=False,
+        predict_bwd=False,
+    ):
+        if predict_fwd:
+            model_output = (
+                self.state_net(s) if self.shared_model else self.fwd_state_net(s)
+            )
+            if lgv_term is None:
+                lgv_term = jnp.zeros_like(s)
+            lgv_term = jnp.clip(lgv_term, -self.inner_clip, self.inner_clip)
+            fwd_clf_logits, fwd_mean, fwd_scale = self._parse_fwd_pred(
+                s, model_output, lgv_term
+            )
+            if log_reward is None:
+                log_flow = jnp.array(0.0)
+            else:
+                log_flow = log_reward - nn.log_sigmoid(fwd_clf_logits)
+            return fwd_clf_logits, fwd_mean, fwd_scale, log_flow
+        if predict_bwd:
+            model_output = (
+                self.state_net(s) if self.shared_model else self.bwd_state_net(s)
+            )
+            return self._parse_bwd_pred(s, model_output)

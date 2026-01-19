@@ -30,7 +30,8 @@ model:
   weight_init: 1e-8  # Initialization of the last layers' weights of the time-dependent network
   bias_init: 0.1  # Initialization of the last layers' bias of the time-dependent network
   gamma: ${target.gfn_non_acyclic.gamma}
-  learn_fwd: True
+  learn_fwd_corrections: True
+  shared_model: False
 
 buffer:
   use: True

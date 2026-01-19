@@ -35,11 +35,11 @@ def per_sample_rnd_no_term(
 ):
     # @jax.checkpoint
     def model_forward(params, s, log_reward, langevin):
-        return model_state.apply_fn(params, s, log_reward, langevin)
+        return model_state.apply_fn(params, s, log_reward, langevin, predict_fwd=True)
 
     # @jax.checkpoint
     def model_backward(params, s_next):
-        return model_state.apply_fn(params, s_next)
+        return model_state.apply_fn(params, s_next, predict_bwd=True)
 
     # @jax.checkpoint
     def compute_log_reward_and_langevin(s):
@@ -50,7 +50,7 @@ def per_sample_rnd_no_term(
         s = jax.lax.stop_gradient(s)
 
         log_reward, langevin = compute_log_reward_and_langevin(s)
-        ((fwd_clf_logits, fwd_mean, fwd_scale), _, log_f) = model_forward(
+        fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
             params, s, log_reward, langevin
         )
         s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
@@ -59,7 +59,7 @@ def per_sample_rnd_no_term(
             -fwd_clf_logits
         )
 
-        (_, (bwd_clf_logits, bwd_mean, bwd_scale), _) = model_backward(params, s_next)
+        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(params, s_next)
         bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jax.nn.log_sigmoid(
             -bwd_clf_logits
         )
@@ -72,7 +72,7 @@ def per_sample_rnd_no_term(
     def simulate_target_to_prior(state, per_step_input):
         s_next, key_gen = state
         s_next = jax.lax.stop_gradient(s_next)
-        (_, (bwd_clf_logits, bwd_mean, bwd_scale), _) = model_backward(params, s_next)
+        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(params, s_next)
         s, key_gen = sample_kernel(key_gen, bwd_mean, bwd_scale)
         s = jax.lax.stop_gradient(s)
         bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jax.nn.log_sigmoid(
@@ -80,7 +80,7 @@ def per_sample_rnd_no_term(
         )
 
         log_reward, langevin = compute_log_reward_and_langevin(s)
-        ((fwd_clf_logits, fwd_mean, fwd_scale), _, log_f) = model_forward(
+        fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
             params, s, log_reward, langevin
         )
         fwd_log_prob = log_prob_kernel(
@@ -159,11 +159,13 @@ def rnd_no_term(
 
     # We need to calculate log flow for the last continuous xs
     terminal_xs = jax.lax.stop_gradient(terminal_xs)
-    (_, _, terminal_log_fs) = model_state.apply_fn(params, terminal_xs, log_rewards)
+    *_, terminal_log_fs = model_state.apply_fn(
+        params, terminal_xs, log_rewards, predict_fwd=True
+    )
 
     # We need to calculate bwd_log_prob for the first continuous xs
     init_xs = jax.lax.stop_gradient(trajectories[:, 0])
-    (_, (bwd_clf_logits, *_), _) = model_state.apply_fn(params, init_xs)
+    bwd_clf_logits, *_ = model_state.apply_fn(params, init_xs, predict_bwd=True)
 
     fwd_log_probs = jnp.concatenate(
         [init_fwd_log_probs[:, None], fwd_log_probs], axis=1
@@ -209,11 +211,11 @@ def per_sample_rnd_with_term(
 
     # @jax.checkpoint
     def model_forward(params, s, log_reward, langevin):
-        return model_state.apply_fn(params, s, log_reward, langevin)
+        return model_state.apply_fn(params, s, log_reward, langevin, predict_fwd=True)
 
     # @jax.checkpoint
     def model_backward(params, s_next):
-        return model_state.apply_fn(params, s_next)
+        return model_state.apply_fn(params, s_next, predict_bwd=True)
 
     # @jax.checkpoint
     def compute_log_reward_and_langevin(s):
@@ -224,7 +226,7 @@ def per_sample_rnd_with_term(
         s = jax.lax.stop_gradient(s)
 
         log_reward, langevin = compute_log_reward_and_langevin(s)
-        ((fwd_clf_logits, fwd_mean, fwd_scale), _, log_f) = model_forward(
+        fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
             params, s, log_reward, langevin
         )
         key, key_gen = jax.random.split(key_gen)
@@ -244,7 +246,7 @@ def per_sample_rnd_with_term(
         fwd_log_prob = jnp.where(
             is_terminal, jnp.zeros_like(fwd_clf_logits), fwd_log_prob
         )
-        (_, (bwd_clf_logits, bwd_mean, bwd_scale), _) = model_backward(params, s_next)
+        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(params, s_next)
         bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jax.nn.log_sigmoid(
             -bwd_clf_logits
         )
@@ -262,7 +264,7 @@ def per_sample_rnd_with_term(
     def simulate_target_to_prior(state, per_step_input, force_stop=False):
         s_next, is_terminal_next, key_gen = state
         s_next = jax.lax.stop_gradient(s_next)
-        (_, (bwd_clf_logits, bwd_mean, bwd_scale), _) = model_backward(params, s_next)
+        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(params, s_next)
         key, key_gen = jax.random.split(key_gen)
         is_terminal = is_terminal_next | jax.random.bernoulli(
             key, nn.sigmoid(bwd_clf_logits)
@@ -282,7 +284,7 @@ def per_sample_rnd_with_term(
         )
 
         log_reward, langevin = compute_log_reward_and_langevin(s)
-        ((fwd_clf_logits, fwd_mean, fwd_scale), _, log_f) = model_forward(
+        fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
             params, s, log_reward, langevin
         )
 
@@ -383,7 +385,7 @@ def rnd_with_term(
         # fmt: off
         init_xs = jax.lax.stop_gradient(input_states)
         init_fwd_log_probs = initial_dist.log_prob(init_xs)
-        (_, (bwd_clf_logits, *_), _) = model_state.apply_fn(params, init_xs)
+        bwd_clf_logits, *_ = model_state.apply_fn(params, init_xs, predict_bwd=True)
 
         fwd_log_probs = jnp.concatenate(
             [init_fwd_log_probs[:, None], fwd_log_probs], axis=1
@@ -429,7 +431,7 @@ def rnd_with_term(
         )
 
         terminal_xs = jax.lax.stop_gradient(terminal_xs)
-        (_, _, terminal_log_fs) = model_state.apply_fn(params, terminal_xs, log_rewards)
+        *_, terminal_log_fs = model_state.apply_fn(params, terminal_xs, log_rewards, predict_fwd=True)
         log_fs = log_fs.at[jnp.arange(log_fs.shape[0]), trajectories_length].set(
             terminal_log_fs
         )

@@ -36,15 +36,19 @@ def visualize_clf_heatmap(
     grid = jnp.stack([X.ravel(), Y.ravel()], axis=1)
     grid = jax.device_put(grid, device)
 
-    ((fwd_clf_logits, *_), (bwd_clf_logits, *_), _) = model_state.apply_fn(
-        model_state.params, grid
-    )
-
     if is_forward:
-        terminal_prob = nn.sigmoid(fwd_clf_logits)
+        clf_logits, *_ = model_state.apply_fn(
+            model_state.params,
+            grid,
+            predict_fwd=True,
+        )
     else:
-        terminal_prob = nn.sigmoid(bwd_clf_logits)
-    pdf = terminal_prob.reshape(X.shape)
+        clf_logits, *_ = model_state.apply_fn(
+            model_state.params,
+            grid,
+            predict_bwd=True,
+        )
+    pdf = nn.sigmoid(clf_logits).reshape(X.shape)
 
     im = ax.pcolormesh(X, Y, pdf, cmap="viridis", alpha=alpha, shading="auto")
     cbar = fig.colorbar(
