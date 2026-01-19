@@ -19,6 +19,8 @@ def pisgrad_net_label_map(path, _):
         return "logZ_optim"
     elif "betas" in path:
         return "betas_optim"
+    elif "bwd_state_net" in path:
+        return "network_bwd_optim"
     else:
         return "network_optim"
 
@@ -97,6 +99,11 @@ def init_model(key, dim, alg_cfg) -> TrainState:
                 learning_rate=build_lr_schedule(alg_cfg.step_size)
             )
         }
+
+        if not model.shared_model:
+            optimizers_map["network_bwd_optim"] = optax.adam(
+                learning_rate=build_lr_schedule(alg_cfg.bwd_step_size)
+            )
 
         if "gfn_subtb" in alg_cfg.name:
             optimizers_map["logflow_optim"] = optax.adam(

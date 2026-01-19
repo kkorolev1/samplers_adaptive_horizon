@@ -77,6 +77,7 @@ gfn_tb: # Trajectory Balance
   init_std: 5.  # for ou or ou_dss
   max_diffusion: 5.  # for pinned_brownian or ou
   step_size: 1e-3
+  bwd_step_size: 1e-3
   logZ_step_size: 1e-1
   init_logZ: 0.
 

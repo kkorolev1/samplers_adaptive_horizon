@@ -66,7 +66,7 @@ class NonAcyclicNet(nn.Module):
 
     def _parse_fwd_pred(self, s, model_output, lgv_term):
         if self.shared_model:
-            model_output, _ = jnp.split(model_output, [self.fwd_pred_dim])
+            model_output, _ = jnp.split(model_output, [self.fwd_pred_dim], axis=-1)
         if self.learn_fwd_corrections:
             (
                 fwd_clf_logits,
@@ -95,7 +95,7 @@ class NonAcyclicNet(nn.Module):
 
     def _parse_bwd_pred(self, s, model_output):
         if self.shared_model:
-            _, model_output = jnp.split(model_output, [self.fwd_pred_dim])
+            _, model_output = jnp.split(model_output, [self.fwd_pred_dim], axis=-1)
 
         (
             bwd_clf_logits,
