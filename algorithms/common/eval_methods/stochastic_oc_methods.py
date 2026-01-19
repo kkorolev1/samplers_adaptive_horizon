@@ -95,14 +95,14 @@ def visualize_trajectories(
     x = jnp.linspace(min_bounds[0], max_bounds[0], 50)
     y = jnp.linspace(min_bounds[1], max_bounds[1], 50)
 
-    if trajectories.shape[-1] == 2:
-        X, Y = jnp.meshgrid(x, y, indexing="xy")
-        grid = jnp.stack([X.ravel(), Y.ravel()], axis=1)
-        grid = jax.device_put(grid, device)
-        pdf = jnp.exp(target.log_prob(grid)).reshape(X.shape)
-        pdf = jax.device_put(pdf, jax.devices("cpu")[0])
-        levels = jnp.linspace(pdf.min(), pdf.max(), 20)
-        ax.contourf(X, Y, pdf, levels=levels, cmap="viridis", alpha=0.5)
+    # if trajectories.shape[-1] == 2:
+    #     X, Y = jnp.meshgrid(x, y, indexing="xy")
+    #     grid = jnp.stack([X.ravel(), Y.ravel()], axis=1)
+    #     grid = jax.device_put(grid, device)
+    #     pdf = jnp.exp(target.log_prob(grid)).reshape(X.shape)
+    #     pdf = jax.device_put(pdf, jax.devices("cpu")[0])
+    #     levels = jnp.linspace(pdf.min(), pdf.max(), 20)
+    #     ax.contourf(X, Y, pdf, levels=levels, cmap="viridis", alpha=0.5)
 
     # 3. Loop through and plot each trajectory
     for i in range(batch_size):
