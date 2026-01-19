@@ -183,14 +183,13 @@ def rnd_no_term(
     log_fs = log_fs.at[:, 0].set(logZ)
 
     log_pfs_over_pbs = fwd_log_probs - bwd_log_probs
-    trajectories_length = (num_steps + 1) * jnp.ones((batch_size,), dtype=int)
 
     return (
-        terminal_xs,
+        trajectories,
         log_pfs_over_pbs.sum(1),  # running costs
         jnp.zeros_like(log_rewards),  # stochastic costs
         -log_rewards,  # terminal costs
-        trajectories_length,
+        (num_steps + 1) * jnp.ones((batch_size,), dtype=int),
         log_pfs_over_pbs,
         log_fs,
     )
@@ -406,12 +405,14 @@ def rnd_with_term(
 
         trajectories_length = (~terminals_mask).sum(axis=1)
 
+        trajectories = trajectories[:, ::-1]
         terminals_mask = terminals_mask[:, ::-1]
         fwd_log_probs = fwd_log_probs[:, ::-1]
         bwd_log_probs = bwd_log_probs[:, ::-1]
         log_fs = log_fs[:, ::-1]
 
         indices = (~terminals_mask).argsort(axis=1, descending=True, stable=True)
+        trajectories = jnp.take_along_axis(trajectories, indices[:,:,None], axis=1)
         fwd_log_probs = jnp.take_along_axis(fwd_log_probs, indices, axis=1)
         bwd_log_probs = jnp.take_along_axis(bwd_log_probs, indices, axis=1)
         log_fs = jnp.take_along_axis(log_fs, indices, axis=1)
@@ -432,6 +433,16 @@ def rnd_with_term(
         log_fs = log_fs.at[jnp.arange(log_fs.shape[0]), trajectories_length].set(
             terminal_log_fs
         )
+        trajectories = jnp.concatenate(
+            [
+                trajectories[:, 1:],
+                jnp.zeros_like(trajectories[:, 0:1]),
+            ],
+            axis=1,
+        )
+        trajectories = trajectories.at[jnp.arange(trajectories.shape[0]), trajectories_length - 1].set(
+            terminal_xs
+        )
 
     logZ = params["params"]["logZ"]
     log_fs = log_fs.at[:, 0].set(logZ)
@@ -446,57 +457,13 @@ def rnd_with_term(
 
     log_pfs_over_pbs = fwd_log_probs - bwd_log_probs
     return (
-        terminal_xs,
+        trajectories,
         log_pfs_over_pbs.sum(1),  # running costs
         jnp.zeros_like(log_rewards),  # stochastic costs
         -log_rewards,  # terminal costs
         trajectories_length,
         log_pfs_over_pbs,
         log_fs,
-    )
-
-
-def loss_fn(
-    key: RandomKey,
-    model_state: TrainState,
-    params: ModelParams,
-    rnd_partial: Callable[[RandomKey, TrainState, ModelParams], tuple[Array, ...]],
-    reg_coef: float = 0.0,
-    invtemp: float = 1.0,
-    logr_clip: float = -1e5,
-    huber_delta: float | None = None,
-):
-    (
-        samples,
-        _,  # running costs
-        _,  # stochastic costs
-        terminal_costs,
-        trajectories_length,
-        log_pfs_over_pbs,
-        log_fs,
-    ) = rnd_partial(key, model_state, params)
-
-    db_discrepancy = log_fs[:, :-1] + log_pfs_over_pbs - log_fs[:, 1:]
-    # Only keep the db_discrepancy values corresponding to valid steps; others set to 0.
-    mask = jnp.arange(db_discrepancy.shape[1])[None, :] < trajectories_length[:, None]
-    db_discrepancy = db_discrepancy * mask
-
-    if huber_delta is not None:
-        db_losses = jnp.where(
-            jnp.abs(db_discrepancy) <= huber_delta,
-            jnp.square(db_discrepancy),
-            huber_delta * jnp.abs(db_discrepancy) - 0.5 * huber_delta**2,
-        )
-    else:
-        db_losses = jnp.square(db_discrepancy)
-
-    losses = db_losses.mean(-1) + reg_coef * log_fs[:, 1:].mean(-1)
-
-    return jnp.mean(losses), (
-        samples,
-        jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),  # log(pb(s'->s)/pf(s->s'))
-        -terminal_costs,  # log_rewards
-        jax.lax.stop_gradient(db_losses),
     )
 
 
@@ -556,7 +523,8 @@ def per_sample_rnd_cont(
         simulate_prior_to_target, aux, jnp.arange(num_steps)
     )
     terminal_x, _ = aux
-    return terminal_x
+    (trajectory,) = per_step_output
+    return terminal_x, trajectory
 
 
 def rnd_cont(
@@ -579,7 +547,7 @@ def rnd_cont(
     step_fn = get_step_fn(aux_tuple, target, step_name)
 
     keys = jax.random.split(key_gen, num=batch_size)
-    terminal_xs = jax.vmap(
+    terminal_xs, trajectories = jax.vmap(
         per_sample_rnd_cont,
         in_axes=(0, None, None, 0, None, None),
     )(
@@ -590,13 +558,61 @@ def rnd_cont(
         step_fn,
         num_steps,
     )
+    trajectories = jnp.concatenate([trajectories, terminal_xs[:, None]], axis=1)
     log_rewards = target.log_prob(terminal_xs)
+
     return (
-        terminal_xs,
+        trajectories,
         jnp.zeros_like(log_rewards),  # running costs
         jnp.zeros_like(log_rewards),  # stochastic costs
         -log_rewards,  # terminal costs
-        num_steps * jnp.ones((batch_size,)),
+        (num_steps + 1) * jnp.ones((batch_size,), dtype=int),
         jnp.zeros_like(log_rewards),
         jnp.zeros_like(log_rewards),
+    )
+
+
+def loss_fn(
+    key: RandomKey,
+    model_state: TrainState,
+    params: ModelParams,
+    rnd_partial: Callable[[RandomKey, TrainState, ModelParams], tuple[Array, ...]],
+    reg_coef: float = 0.0,
+    invtemp: float = 1.0,
+    logr_clip: float = -1e5,
+    huber_delta: float | None = None,
+):
+    (
+        trajectories,
+        _,  # running costs
+        _,  # stochastic costs
+        terminal_costs,
+        trajectories_length,
+        log_pfs_over_pbs,
+        log_fs,
+    ) = rnd_partial(key, model_state, params)
+
+    db_discrepancy = log_fs[:, :-1] + log_pfs_over_pbs - log_fs[:, 1:]
+    # Only keep the db_discrepancy values corresponding to valid steps; others set to 0.
+    mask = jnp.arange(db_discrepancy.shape[1])[None, :] < trajectories_length[:, None]
+    db_discrepancy = db_discrepancy * mask
+
+    if huber_delta is not None:
+        db_losses = jnp.where(
+            jnp.abs(db_discrepancy) <= huber_delta,
+            jnp.square(db_discrepancy),
+            huber_delta * jnp.abs(db_discrepancy) - 0.5 * huber_delta**2,
+        )
+    else:
+        db_losses = jnp.square(db_discrepancy)
+
+    losses = db_losses.mean(-1) + reg_coef * log_fs[:, 1:].mean(-1)
+
+    return jnp.mean(losses), (
+        trajectories[
+            jnp.arange(trajectories.shape[0]), trajectories_length - 1
+        ],  # samples
+        jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),  # log(pb(s'->s)/pf(s->s'))
+        -terminal_costs,  # log_rewards
+        jax.lax.stop_gradient(db_losses),
     )

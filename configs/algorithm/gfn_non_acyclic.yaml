@@ -45,6 +45,6 @@ buffer:
 
 local_search:
   use: True
-  cycle: 100
+  cycle: 25
   gamma: 1e-3
   num_steps: 300

@@ -52,10 +52,95 @@ def visualize_clf_heatmap(
     )
     cbar.ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:.2f}"))
 
-    # ax.scatter(samples[:, 0], samples[:, 1], s=5, c="blue", alpha=alpha)
-
     ax.set_xlabel("x1")
     ax.set_ylabel("x2")
+    ax.grid(True, linestyle="--", alpha=0.6)
+    ax.set_xlim((x.min(), x.max()))
+    ax.set_ylim((y.min(), y.max()))
+    ax.set_aspect("equal", adjustable="box")
+
+    wb = {f"figures/{prefix + '_' if prefix else ''}vis": [wandb.Image(fig)]}
+    if show:
+        plt.show()
+    else:
+        plt.close()
+    return wb
+
+
+def visualize_trajectories(
+    trajectories,
+    trajectories_length,
+    target,
+    dims=(0, 1),
+    device="cpu",
+    alpha=0.8,
+    prefix="",
+    show=False,
+):
+    fig = plt.figure(figsize=(6, 6))
+    ax = fig.add_subplot()
+
+    samples = trajectories[jnp.arange(trajectories.shape[0]), trajectories_length - 1]
+    samples = samples[:, dims]
+    min_bounds = samples.min(axis=0) - 1.5
+    max_bounds = samples.max(axis=0) + 1.5
+
+    batch_size = trajectories.shape[0]
+
+    cmap = plt.get_cmap("viridis")
+    colors = cmap(jnp.linspace(0, 1, batch_size))
+
+    marker_size = 50
+
+    x = jnp.linspace(min_bounds[0], max_bounds[0], 50)
+    y = jnp.linspace(min_bounds[1], max_bounds[1], 50)
+
+    if trajectories.shape[-1] == 2:
+        X, Y = jnp.meshgrid(x, y, indexing="xy")
+        grid = jnp.stack([X.ravel(), Y.ravel()], axis=1)
+        grid = jax.device_put(grid, device)
+        pdf = jnp.exp(target.log_prob(grid)).reshape(X.shape)
+        pdf = jax.device_put(pdf, jax.devices("cpu")[0])
+        levels = jnp.linspace(pdf.min(), pdf.max(), 20)
+        ax.contourf(X, Y, pdf, levels=levels, cmap="viridis", alpha=0.5)
+
+    # 3. Loop through and plot each trajectory
+    for i in range(batch_size):
+        color = colors[i]
+
+        # 4. Slice the valid part of the trajectory
+        valid_traj = trajectories[i, : trajectories_length[i]]
+
+        # 5. Plot the trajectory line
+        ax.plot(
+            valid_traj[:, dims[0]],
+            valid_traj[:, dims[1]],
+            color=color,
+            alpha=alpha,
+        )
+
+        # 6. Mark the start and end points
+        ax.scatter(
+            valid_traj[0, dims[0]],
+            valid_traj[0, dims[1]],
+            color=color,
+            marker="o",
+            s=marker_size,
+            edgecolors="black",
+            zorder=3,
+        )
+        ax.scatter(
+            valid_traj[-1, dims[0]],
+            valid_traj[-1, dims[1]],
+            color=color,
+            marker="X",
+            s=marker_size,
+            edgecolors="black",
+            zorder=3,
+        )
+
+    ax.set_xlabel(f"x{dims[0]+1}")
+    ax.set_ylabel(f"x{dims[1]+1}")
     ax.grid(True, linestyle="--", alpha=0.6)
     ax.set_xlim((x.min(), x.max()))
     ax.set_ylim((y.min(), y.max()))
@@ -107,13 +192,17 @@ def get_eval_fn(rnd, target, target_xs, cfg):
         else:
             params = (model_state.params,)
         (
-            samples,
+            trajectories,
             running_costs,
-            stochastic_costs,
-            terminal_costs,
+            _,
+            _,
             trajectories_length,
-        ) = rnd_reverse(key, model_state, *params)[:5]
-
+        ) = rnd_reverse(
+            key, model_state, *params
+        )[:5]
+        samples = trajectories[
+            jnp.arange(trajectories.shape[0]), trajectories_length - 1
+        ]
         log_is_weights = -running_costs
         ln_z = jax.scipy.special.logsumexp(log_is_weights) - jnp.log(cfg.eval_samples)
         elbo = jnp.mean(log_is_weights)
@@ -136,12 +225,14 @@ def get_eval_fn(rnd, target, target_xs, cfg):
 
         if cfg.compute_forward_metrics and target.can_sample:
             (
-                fwd_samples,
+                _,
                 fwd_running_costs,
-                fwd_stochastic_costs,
-                fwd_terminal_costs,
+                _,
+                _,
                 fwd_trajectories_length,
-            ) = rnd_forward(jax.random.PRNGKey(0), model_state, *params)[:5]
+            ) = rnd_forward(
+                jax.random.PRNGKey(0), model_state, *params
+            )[:5]
             fwd_log_is_weights = -fwd_running_costs
             fwd_ln_z = jax.scipy.special.logsumexp(fwd_log_is_weights) - jnp.log(
                 cfg.eval_samples
@@ -164,22 +255,33 @@ def get_eval_fn(rnd, target, target_xs, cfg):
             logger["mean_traj_length/forward"].append(jnp.mean(fwd_trajectories_length))
 
         logger.update(target.visualise(samples=samples))
-        logger.update(
-            visualize_clf_heatmap(
-                model_state,
-                target,
-                is_forward=True,
-                device=samples.device,
-                prefix="fwd_clf",
+        if cfg.target.dim == 2:
+            logger.update(
+                visualize_clf_heatmap(
+                    model_state,
+                    target,
+                    is_forward=True,
+                    device=samples.device,
+                    prefix="fwd_clf",
+                )
             )
-        )
+            logger.update(
+                visualize_clf_heatmap(
+                    model_state,
+                    target,
+                    is_forward=False,
+                    device=samples.device,
+                    prefix="bwd_clf",
+                )
+            )
         logger.update(
-            visualize_clf_heatmap(
-                model_state,
+            visualize_trajectories(
+                trajectories[:10],
+                trajectories_length[:10],
                 target,
-                is_forward=False,
+                dims=(0, 1),
                 device=samples.device,
-                prefix="bwd_clf",
+                prefix="trajectories",
             )
         )
 
