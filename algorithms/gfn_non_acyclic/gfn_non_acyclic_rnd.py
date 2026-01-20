@@ -235,7 +235,7 @@ def per_sample_rnd_with_term(
         )
         if force_stop:
             is_terminal_next = jnp.array(True)
-            fwd_clf_logits = 100.0
+            fwd_clf_logits = jnp.array(100.0)
         s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
         s_next = jax.lax.stop_gradient(s_next)
         fwd_log_prob = log_prob_kernel(s_next, fwd_mean, fwd_scale) + nn.log_sigmoid(
@@ -272,7 +272,7 @@ def per_sample_rnd_with_term(
         )
         if force_stop:
             is_terminal = jnp.array(True)
-            bwd_clf_logits = 100.0
+            bwd_clf_logits = jnp.array(100.0)
         s, key_gen = sample_kernel(key_gen, bwd_mean, bwd_scale)
         s = jax.lax.stop_gradient(s)
         bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + nn.log_sigmoid(
