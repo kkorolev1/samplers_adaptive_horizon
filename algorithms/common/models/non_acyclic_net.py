@@ -141,7 +141,7 @@ class NonAcyclicNet(nn.Module):
                 s, model_output, lgv_term
             )
             if log_reward is None:
-                log_flow = jnp.array(0.0)
+                log_flow = jnp.zeros_like(s[..., 0])
             else:
                 log_flow = log_reward - nn.log_sigmoid(fwd_clf_logits)
             return fwd_clf_logits, fwd_mean, fwd_scale, log_flow
