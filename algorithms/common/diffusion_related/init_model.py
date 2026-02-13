@@ -135,7 +135,11 @@ def init_model(key, dim, alg_cfg) -> TrainState:
                 if alg_cfg.grad_clip > 0
                 else optax.identity()
             ),
-            optax.masked(optax.add_decayed_weights(alg_cfg.weight_decay), mask_fn),
+            (
+                optax.masked(optax.add_decayed_weights(alg_cfg.weight_decay), mask_fn)
+                if alg_cfg.weight_decay > 0
+                else optax.identity()
+            ),
             partitioned_optimizer,
         )
 

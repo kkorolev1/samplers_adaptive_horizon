@@ -24,7 +24,6 @@ def gfn_non_acyclic_baseline(cfg, target, exp=None):
     dim = target.dim
     alg_cfg = cfg.algorithm
     batch_size = alg_cfg.batch_size
-    num_steps = alg_cfg.num_steps
 
     target_xs = target.sample(jax.random.PRNGKey(0), (cfg.eval_samples,))
 
@@ -41,7 +40,7 @@ def gfn_non_acyclic_baseline(cfg, target, exp=None):
         rnd_cont,
         aux_tuple=aux_tuple,
         target=target,
-        num_steps=num_steps,
+        num_steps=alg_cfg.eval_max_steps,
         step_name=alg_cfg.step_name,
         initial_dist=initial_dist,
     )

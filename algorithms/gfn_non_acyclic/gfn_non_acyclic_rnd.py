@@ -7,6 +7,7 @@ import jax.numpy as jnp
 from functools import partial
 import numpyro.distributions as npdist
 from flax.training.train_state import TrainState
+import equinox
 
 from algorithms.common.types import Array, RandomKey, ModelParams
 from algorithms.gfn_non_acyclic.sampling_utils import binary_search_smoothing
@@ -34,11 +35,11 @@ def per_sample_rnd_no_term(
     prior_to_target=True,
 ):
     # @jax.checkpoint
-    def model_forward(params, s, log_reward, langevin):
+    def model_forward(s, log_reward, langevin):
         return model_state.apply_fn(params, s, log_reward, langevin, predict_fwd=True)
 
     # @jax.checkpoint
-    def model_backward(params, s_next):
+    def model_backward(s_next):
         return model_state.apply_fn(params, s_next, predict_bwd=True)
 
     # @jax.checkpoint
@@ -51,7 +52,7 @@ def per_sample_rnd_no_term(
 
         log_reward, langevin = compute_log_reward_and_langevin(s)
         fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
-            params, s, log_reward, langevin
+            s, log_reward, langevin
         )
         s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
         s_next = jax.lax.stop_gradient(s_next)
@@ -59,7 +60,7 @@ def per_sample_rnd_no_term(
             -fwd_clf_logits
         )
 
-        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(params, s_next)
+        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next)
         bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jax.nn.log_sigmoid(
             -bwd_clf_logits
         )
@@ -72,7 +73,7 @@ def per_sample_rnd_no_term(
     def simulate_target_to_prior(state, per_step_input):
         s_next, key_gen = state
         s_next = jax.lax.stop_gradient(s_next)
-        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(params, s_next)
+        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next)
         s, key_gen = sample_kernel(key_gen, bwd_mean, bwd_scale)
         s = jax.lax.stop_gradient(s)
         bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jax.nn.log_sigmoid(
@@ -81,7 +82,7 @@ def per_sample_rnd_no_term(
 
         log_reward, langevin = compute_log_reward_and_langevin(s)
         fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
-            params, s, log_reward, langevin
+            s, log_reward, langevin
         )
         fwd_log_prob = log_prob_kernel(
             s_next, fwd_mean, fwd_scale
@@ -210,24 +211,31 @@ def per_sample_rnd_with_term(
 ):
 
     # @jax.checkpoint
-    def model_forward(params, s, log_reward, langevin):
+    def model_forward(s, log_reward, langevin):
         return model_state.apply_fn(params, s, log_reward, langevin, predict_fwd=True)
 
     # @jax.checkpoint
-    def model_backward(params, s_next):
+    def model_backward(s_next):
         return model_state.apply_fn(params, s_next, predict_bwd=True)
 
     # @jax.checkpoint
     def compute_log_reward_and_langevin(s):
         return jax.lax.stop_gradient(jax.value_and_grad(target.log_prob)(s))
 
-    def simulate_prior_to_target(state, per_step_input, force_stop=False):
-        s, is_terminal, key_gen = state
-        s = jax.lax.stop_gradient(s)
+    def cond_fun(carry):
+        state, _ = carry
+        s, is_terminal, key_gen, step = state
+        return (jnp.any(~is_terminal)) & (step < num_steps)
 
+    def simulate_prior_to_target(carry, force_stop=False):
+        state, state_hist = carry
+        s, is_terminal, key_gen, step = state
+        trajectories, terminals_mask, fwd_log_probs, bwd_log_probs, log_fs = state_hist
+
+        s = jax.lax.stop_gradient(s)
         log_reward, langevin = compute_log_reward_and_langevin(s)
         fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
-            params, s, log_reward, langevin
+            s, log_reward, langevin
         )
         key, key_gen = jax.random.split(key_gen)
         is_terminal_next = is_terminal | jax.random.bernoulli(
@@ -247,7 +255,7 @@ def per_sample_rnd_with_term(
         fwd_log_prob = jnp.where(
             is_terminal, jnp.zeros_like(fwd_clf_logits), fwd_log_prob
         )
-        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(params, s_next)
+        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next)
         bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jax.nn.log_sigmoid(
             -bwd_clf_logits
         )
@@ -257,15 +265,30 @@ def per_sample_rnd_with_term(
         )
 
         log_f = jnp.where(is_terminal, jnp.zeros_like(log_f), log_f)
+        s_next = jnp.where(is_terminal_next, jnp.zeros_like(s_next), s_next)
 
-        next_state = (s_next, is_terminal_next, key_gen)
-        per_step_output = (s, is_terminal, fwd_log_prob, bwd_log_prob, log_f)
-        return next_state, per_step_output
+        trajectories = trajectories.at[step].set(s)
+        terminals_mask = terminals_mask.at[step].set(is_terminal)
+        fwd_log_probs = fwd_log_probs.at[step].set(fwd_log_prob)
+        bwd_log_probs = bwd_log_probs.at[step].set(bwd_log_prob)
+        log_fs = log_fs.at[step].set(log_f)
 
-    def simulate_target_to_prior(state, per_step_input, force_stop=False):
-        s_next, is_terminal_next, key_gen = state
+        state_next = (s_next, is_terminal_next, key_gen, step + 1)
+        state_hist = (
+            trajectories,
+            terminals_mask,
+            fwd_log_probs,
+            bwd_log_probs,
+            log_fs,
+        )
+        return (state_next, state_hist)
+
+    def simulate_target_to_prior(carry, force_stop=False):
+        state, state_hist = carry
+        s_next, is_terminal_next, key_gen, step = state
+        trajectories, terminals_mask, fwd_log_probs, bwd_log_probs, log_fs = state_hist
         s_next = jax.lax.stop_gradient(s_next)
-        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(params, s_next)
+        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next)
         key, key_gen = jax.random.split(key_gen)
         is_terminal = is_terminal_next | jax.random.bernoulli(
             key, nn.sigmoid(bwd_clf_logits)
@@ -287,7 +310,7 @@ def per_sample_rnd_with_term(
 
         log_reward, langevin = compute_log_reward_and_langevin(s)
         fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
-            params, s, log_reward, langevin
+            s, log_reward, langevin
         )
 
         fwd_log_prob = log_prob_kernel(
@@ -301,45 +324,57 @@ def per_sample_rnd_with_term(
         )
 
         log_f = jnp.where(is_terminal, jnp.zeros_like(log_f), log_f)
+        s = jnp.where(is_terminal, jnp.zeros_like(s), s)
 
-        next_state = (s, is_terminal, key_gen)
-        per_step_output = (s, is_terminal, fwd_log_prob, bwd_log_prob, log_f)
-        return next_state, per_step_output
+        trajectories = trajectories.at[step].set(s)
+        terminals_mask = terminals_mask.at[step].set(is_terminal)
+        fwd_log_probs = fwd_log_probs.at[step].set(fwd_log_prob)
+        bwd_log_probs = bwd_log_probs.at[step].set(bwd_log_prob)
+        log_fs = log_fs.at[step].set(log_f)
 
-    def concat_extra(scan_output, extra_step_output):
-        aux, per_step_output = scan_output
-        extra_aux, extra_per_step_output = extra_step_output
-        per_step_output = tuple(
-            jnp.concatenate([x, jnp.expand_dims(y, axis=0)], axis=0)
-            for x, y in zip(per_step_output, extra_per_step_output)
+        state_next = (s, is_terminal, key_gen, step + 1)
+        state_hist = (
+            trajectories,
+            terminals_mask,
+            fwd_log_probs,
+            bwd_log_probs,
+            log_fs,
         )
-        return extra_aux, per_step_output
+        return (state_next, state_hist)
+
+    d = input_state.shape[-1]
+    trajectories = jnp.zeros((num_steps + 1, d))
+    terminals_mask = jnp.ones((num_steps + 1,), dtype=bool)
+    fwd_log_probs = jnp.zeros((num_steps + 1,))
+    bwd_log_probs = jnp.zeros((num_steps + 1,))
+    log_fs = jnp.zeros((num_steps + 1,))
+    state_hist = (trajectories, terminals_mask, fwd_log_probs, bwd_log_probs, log_fs)
 
     if prior_to_target:
-        init_x = input_state
-        aux = (init_x, jnp.array(False), key)
-        aux, per_step_output = jax.lax.scan(
-            simulate_prior_to_target, aux, jnp.arange(num_steps)
+        state_init = (input_state, jnp.array(False), key, 0)
+        carry = (state_init, state_hist)
+        carry = equinox.internal.while_loop(
+            cond_fun,
+            simulate_prior_to_target,
+            carry,
+            max_steps=num_steps,
+            kind="checkpointed",
         )
-
-        aux, per_step_output = concat_extra(
-            (aux, per_step_output),
-            simulate_prior_to_target(aux, jnp.array(num_steps), force_stop=True),
-        )
+        carry = simulate_prior_to_target(carry, force_stop=True)
     else:
-        terminal_x = input_state
-        aux = (terminal_x, jnp.array(False), key)
-        aux, per_step_output = jax.lax.scan(
-            simulate_target_to_prior, aux, jnp.arange(num_steps)
+        state_init = (input_state, jnp.array(False), key, 0)
+        carry = (state_init, state_hist)
+        carry = equinox.internal.while_loop(
+            cond_fun,
+            simulate_target_to_prior,
+            carry,
+            max_steps=num_steps,
+            kind="checkpointed",
         )
+        carry = simulate_target_to_prior(carry, force_stop=True)
 
-        aux, per_step_output = concat_extra(
-            (aux, per_step_output),
-            simulate_target_to_prior(aux, jnp.array(num_steps), force_stop=True),
-        )
-
-    trajectory, terminal_mask, fwd_log_prob, bwd_log_prob, log_f = per_step_output
-    return trajectory, terminal_mask, fwd_log_prob, bwd_log_prob, log_f
+    state, state_hist = carry
+    return state_hist
 
 
 def rnd_with_term(
@@ -619,4 +654,72 @@ def loss_fn(
         jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),  # log(pb(s'->s)/pf(s->s'))
         -terminal_costs,  # log_rewards
         jax.lax.stop_gradient(db_losses),
+    )
+
+
+if __name__ == "__main__":
+    key = jax.random.PRNGKey(0)
+
+    # Define a dummy model class where we can hardcode values for testing
+    class DummyModel:
+        def apply_fn(
+            self,
+            params,
+            s,
+            log_reward=None,
+            lgv_term=None,
+            predict_fwd=False,
+            predict_bwd=False,
+        ):
+            # Emulate logic in non_acyclic_net.py's __call__
+            # Only basic logic/hardcoded but preserves output structure
+            if predict_fwd:
+                # Preserve same shape as s: (batch..., dim). For 1d s (dim,) use batch_shape=().
+                batch_shape = s.shape[:-1] if len(s.shape) > 1 else ()
+                fwd_clf_logits = jnp.full(batch_shape, 0.0)  # mimic logits
+                fwd_mean = s
+                fwd_scale = jnp.full(batch_shape + (s.shape[-1],), 1.0)
+                if log_reward is None:
+                    log_flow = jnp.zeros(batch_shape).astype(jnp.float32)
+                else:
+                    log_flow = s.astype(jnp.float32).squeeze(-1)
+                return fwd_clf_logits, fwd_mean, fwd_scale, log_flow
+            if predict_bwd:
+                batch_shape = s.shape[:-1] if len(s.shape) > 1 else ()
+                bwd_clf_logits = jnp.full(batch_shape, 0.0)  # mimic other logits
+                bwd_mean = s
+                bwd_scale = jnp.full(batch_shape + (s.shape[-1],), 1.0)
+                return bwd_clf_logits, bwd_mean, bwd_scale
+
+    class DummyTrainState:
+        def __init__(self):
+            self.apply_fn = DummyModel().apply_fn
+            self.params = {"params": {"logZ": -1.0}}
+            self.tx = None  # optimizer dummy
+
+    class DummyTarget:
+        def log_prob(self, x):
+            return -42 * jnp.ones_like(x[..., 0])
+
+    class DummyInitialDist:
+        def sample(self, seed, sample_shape):
+            return jnp.ones(sample_shape, dtype=jnp.float32)[:, None]
+
+        def log_prob(self, x):
+            return -13 * jnp.ones_like(x[..., 0])
+
+    # Use the dummy train state instead of the real one
+    model_state = DummyTrainState()
+    params = model_state.params
+    rnd_partial = rnd_with_term(
+        key,
+        model_state,
+        params,
+        2,
+        (1.0,),
+        DummyTarget(),
+        num_steps=5,
+        prior_to_target=False,
+        initial_dist=DummyInitialDist(),
+        terminal_xs=jnp.array([3.0, 2.0])[:, None],
     )
