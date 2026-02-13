@@ -107,6 +107,15 @@ gfn_subtb: # Sub-Trajectory Balance
   mcmc_step_size: 0.2
   flow_num_hid: 64
 
+gfn_non_acyclic:
+  init_std: 1.0
+  step_size: 1e-3
+  num_steps: 200
+  logZ_step_size: 1e-1
+  init_logZ: 0.
+  gamma: 0.5
+  reg_coef: 0.0
+
 all: # Parameters that are shared between all algorithms
   batch_size: 2000
   iters: 20000

@@ -15,7 +15,9 @@ from targets.base_target import Target
 
 
 class GaussianMixtureModel(Target):
-    def __init__(self, num_components, dim, log_Z=0.0, can_sample=True, sample_bounds=None) -> None:
+    def __init__(
+        self, num_components, dim, log_Z=0.0, can_sample=True, sample_bounds=None
+    ) -> None:
         # parameters
         super().__init__(dim, log_Z, can_sample)
 
@@ -31,9 +33,14 @@ class GaussianMixtureModel(Target):
         seed = jax.random.PRNGKey(0)
 
         # set mixture components
-        self.locs = jax.random.uniform(
-            seed, minval=self.min_mean_val, maxval=self.max_mean_val, shape=(num_components, dim)
-        )
+        # self.locs = jax.random.uniform(
+        #     seed,
+        #     minval=self.min_mean_val,
+        #     maxval=self.max_mean_val,
+        #     shape=(num_components, dim),
+        # )
+        self.locs = jnp.array([[-3.0, -3.0], [3.0, 3.0]])
+
         self.covariances = []
         for _ in range(num_components):
             seed, subkey = random.split(seed)
@@ -46,7 +53,9 @@ class GaussianMixtureModel(Target):
             self.covariances.append(cov_matrix)
         self.covariances = jnp.array(self.covariances)
 
-        component_dist = distrax.MultivariateNormalFullCovariance(self.locs, self.covariances)
+        component_dist = distrax.MultivariateNormalFullCovariance(
+            self.locs, self.covariances
+        )
 
         # set mixture weights
         uniform_mws = True
@@ -56,14 +65,16 @@ class GaussianMixtureModel(Target):
             )
         else:
             self.mixture_weights = distrax.Categorical(
-                logits=dist.Uniform(low=min_val_mixture_weight, high=max_val_mixture_weight).sample(
-                    seed, sample_shape=(num_components,)
-                )
+                logits=dist.Uniform(
+                    low=min_val_mixture_weight, high=max_val_mixture_weight
+                ).sample(seed, sample_shape=(num_components,))
             )
 
         self.mixture_distribution = distrax.MixtureSameFamily(
-            mixture_distribution=self.mixture_weights, components_distribution=component_dist
+            mixture_distribution=self.mixture_weights,
+            components_distribution=component_dist,
         )
+        self._plot_bound = 7
 
     def sample(self, seed: chex.PRNGKey, sample_shape: chex.Shape) -> chex.Array:
         return self.mixture_distribution.sample(seed=seed, sample_shape=sample_shape)
@@ -90,7 +101,8 @@ class GaussianMixtureModel(Target):
 
         components_dist = distrax.MultivariateNormalFullCovariance(
             jnp.sqrt(1 - lambda_t) * self.locs,
-            (1 - lambda_t) * self.covariances + init_std**2 * lambda_t * jnp.eye(self.dim),
+            (1 - lambda_t) * self.covariances
+            + init_std**2 * lambda_t * jnp.eye(self.dim),
         )
         t_marginal_distribution = distrax.MixtureSameFamily(
             mixture_distribution=self.mixture_weights,
@@ -105,10 +117,14 @@ class GaussianMixtureModel(Target):
     def entropy(self, samples: chex.Array = None):
         expanded = jnp.expand_dims(samples, axis=-2)
         # Compute `log_prob` in every component.
-        idx = jnp.argmax(self.mixture_distribution.components_distribution.log_prob(expanded), 1)
+        idx = jnp.argmax(
+            self.mixture_distribution.components_distribution.log_prob(expanded), 1
+        )
         unique_elements, counts = jnp.unique(idx, return_counts=True)
         mode_dist = counts / samples.shape[0]
-        entropy = -jnp.sum(mode_dist * (jnp.log(mode_dist) / jnp.log(self.num_components)))
+        entropy = -jnp.sum(
+            mode_dist * (jnp.log(mode_dist) / jnp.log(self.num_components))
+        )
         return entropy
 
     def visualise(
@@ -125,11 +141,19 @@ class GaussianMixtureModel(Target):
             marginal_dims = (0, 1)
             log_prob_fn = log_prob_fn or self.log_prob
             plot_contours_2D(
-                log_prob_fn, self.dim, ax, marginal_dims=marginal_dims, bounds=bounds, levels=50
+                log_prob_fn,
+                self.dim,
+                ax,
+                marginal_dims=marginal_dims,
+                bounds=bounds,
+                levels=50,
             )
             if samples is not None:
                 plot_marginal_pair(
-                    samples[:, marginal_dims], ax, marginal_dims=marginal_dims, bounds=bounds
+                    samples[:, marginal_dims],
+                    ax,
+                    marginal_dims=marginal_dims,
+                    bounds=bounds,
                 )
             plt.xticks([])
             plt.yticks([])

@@ -87,6 +87,8 @@ gfn_non_acyclic:
   num_steps: 200
   logZ_step_size: 1e-1
   init_logZ: 0.
+  gamma: 0.1
+  reg_coef: 0.0
 
 gfn_subtb: # Sub-Trajectory Balance
   reference_process: ou_dds  # pinned_brownian, ou, or ou_dds
