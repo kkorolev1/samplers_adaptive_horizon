@@ -84,6 +84,7 @@ gfn_tb: # Trajectory Balance
 gfn_non_acyclic:
   init_std: 1.0
   step_size: 1e-3
+  bwd_step_size: 1e-3
   num_steps: 200
   logZ_step_size: 1e-1
   init_logZ: 0.

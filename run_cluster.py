@@ -7,24 +7,50 @@ def create_argument_combinations():
     """Create all combinations of arguments for grid search."""
 
     # Define the parameter grid
-    param_grid = []
+    param_grid = [
+        {"algorithm.model.gamma": 0.05, "algorithm.eval_max_steps": 50},
+        {"algorithm.model.gamma": 0.05, "algorithm.eval_max_steps": 100},
+        {"algorithm.model.gamma": 0.05, "algorithm.eval_max_steps": 200},
+        {"algorithm.model.gamma": 0.05, "algorithm.eval_max_steps": 1000},
+        {"algorithm.model.gamma": 0.01, "algorithm.eval_max_steps": 50},
+        {"algorithm.model.gamma": 0.01, "algorithm.eval_max_steps": 100},
+        {"algorithm.model.gamma": 0.01, "algorithm.eval_max_steps": 200},
+        {"algorithm.model.gamma": 0.01, "algorithm.eval_max_steps": 1000},
+        # {"algorithm.model.gamma": 0.5, "algorithm.eval_max_steps": 50},
+        # {"algorithm.model.gamma": 0.5, "algorithm.eval_max_steps": 100},
+        # {"algorithm.model.gamma": 0.5, "algorithm.eval_max_steps": 200},
+        # {"algorithm.model.gamma": 0.5, "algorithm.eval_max_steps": 1000},
+        # {"algorithm.model.gamma": 1.0, "algorithm.eval_max_steps": 50},
+        # {"algorithm.model.gamma": 1.0, "algorithm.eval_max_steps": 100},
+        # {"algorithm.model.gamma": 1.0, "algorithm.eval_max_steps": 200},
+        # {"algorithm.model.gamma": 1.0, "algorithm.eval_max_steps": 1000},
+    ]
     fixed_params = {
-        "algorithm": "gfn_non_acyclic",
-        "target": "gaussian_mixture9",
-        "algorithm.weight_decay": 1e-8,
-        "algorithm.reg_coef": 1e-4,
-        "algorithm.no_term": False,
-        "algorithm.model.learn_fwd_corrections": True,
-        "algorithm.model.shared_model": False,
-        "algorithm.num_steps": 200,
-        "algorithm.eval_max_steps": 200,
-        "algorithm.local_search.use": True,
-        "algorithm.step_size": "1e-3",
-        "algorithm.bwd_step_size": "1e-3",
-        "algorithm.model.outer_clip": "100",
-        "algorithm.model.gamma": "0.5",
-        "algorithm.buffer.bwd_to_fwd_ratio": 2,
-    } 
+        "algorithm": "gfn_non_acyclic_baseline",
+        "target": "many_well",
+        "compute_forward_metrics": False,
+        "algorithm.step_name": "ula",
+        # "algorithm.model.gamma": "0.1",
+        # "algorithm.eval_max_steps": 100,
+    }
+    # fixed_params = {
+    #     "algorithm": "gfn_non_acyclic",
+    #     # "target": "gaussian_mixture9",
+    #     "target": "many_well",
+    #     "algorithm.weight_decay": 0,
+    #     "algorithm.reg_coef": 1e-3,
+    #     "algorithm.no_term": False,
+    #     "algorithm.model.learn_fwd_corrections": True,
+    #     "algorithm.model.shared_model": False,
+    #     "algorithm.local_search.use": True,
+    #     "algorithm.num_steps": 1000,
+    #     "algorithm.eval_max_steps": 1000,
+    #     "algorithm.step_size": "1e-3",
+    #     "algorithm.bwd_step_size": "1e-3",
+    #     "algorithm.model.outer_clip": "10",
+    #     "algorithm.model.gamma": "0.1",
+    #     "algorithm.buffer.bwd_to_fwd_ratio": 2,
+    # } 
 
     # Run with fixed params only
     if len(param_grid) == 0:
@@ -72,10 +98,10 @@ def main(args):
         sbatch_command = (
             f"sbatch -A proj_1650 -c {args.cpu_cores} -G {args.gpus} --job-name={name}"
             f"--error=sbatch_logs_{version}/{name}/%j.err --output=sbatch_logs_{version}/{name}/%j.log "
-            f'--constraint="{constraint}" --time=0-1:00:00'
+            f'--constraint="{constraint}" --time=0-5:00:00'
         )
         if constraint in ["type_g", "type_h"]:
-            sbatch_command += " --reservation rocky"
+            sbatch_command += " --partition rocky"
         print(python_command, "\n\n")
         if not args.dry_run:
             os.system(f'{sbatch_command} --wrap="{python_command}"')
