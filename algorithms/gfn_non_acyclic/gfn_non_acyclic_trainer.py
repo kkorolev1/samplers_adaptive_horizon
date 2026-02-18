@@ -18,7 +18,8 @@ from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import (
     rnd_no_term,
     rnd_with_term,
     rnd_cont,
-    loss_fn,
+    loss_fn_db,
+    loss_fn_subtb,
 )
 from algorithms.gfn_non_acyclic.utils import get_invtemp
 from eval.utils import extract_last_entry
@@ -40,7 +41,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
     initial_dist = distrax.MultivariateNormalDiag(
         jnp.zeros(dim), jnp.ones(dim) * alg_cfg.init_std
     )
-    aux_tuple = (alg_cfg.model.gamma,)
+    aux_tuple = (alg_cfg.logr_clip,)
 
     # Initialize the buffer
     use_buffer = buffer_cfg.use
@@ -85,22 +86,34 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         num_steps=alg_cfg.eval_max_steps,
         initial_dist=initial_dist,
     )
-    loss_fn_base = partial(loss_fn, logr_clip=alg_cfg.logr_clip, reg_coef=reg_coef)
+    if alg_cfg.loss_type == "db":
+        loss_fn_base = partial(
+            loss_fn_db,
+            huber_delta=alg_cfg.huber_delta,
+            reg_coef=reg_coef,
+        )
+    elif alg_cfg.loss_type == "subtb":
+        loss_fn_base = partial(
+            loss_fn_subtb,
+            huber_delta=alg_cfg.huber_delta,
+            n_chunks=alg_cfg.n_chunks,
+            reg_coef=reg_coef,
+        )
+    else:
+        raise ValueError(f"Unknown loss type {alg_cfg.loss_type}")
 
     # Define the function to be JIT-ed for FWD pass
     @partial(jax.jit)
     @partial(jax.grad, argnums=2, has_aux=True)
-    def loss_fwd_grad_fn(key, model_state, params, invtemp=1.0):
+    def loss_fwd_grad_fn(key, model_state, params):
         # prior_to_target=True, terminal_xs=None
         rnd_p = partial(rnd_partial_base, batch_size=batch_size, prior_to_target=True)
-        return loss_fn_base(key, model_state, params, rnd_p, invtemp=invtemp)
+        return loss_fn_base(key, model_state, params, rnd_p)
 
     # --- Define the function to be JIT-ed for BWD pass ---
     @partial(jax.jit)
     @partial(jax.grad, argnums=2, has_aux=True)
-    def loss_bwd_grad_fn(
-        key, model_state, params, terminal_xs, log_rewards, invtemp=1.0
-    ):
+    def loss_bwd_grad_fn(key, model_state, params, terminal_xs, log_rewards):
         # prior_to_target=False, terminal_xs is now an argument
         rnd_p = partial(
             rnd_partial_base,
@@ -109,13 +122,13 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
             terminal_xs=terminal_xs,
             log_rewards=log_rewards,
         )
-        return loss_fn_base(key, model_state, params, rnd_p, invtemp=invtemp)
+        return loss_fn_base(key, model_state, params, rnd_p)
 
     # Define the function to be JIT-ed for FWD pass without gradients
     @partial(jax.jit)
-    def loss_fwd_nograd_fn(key, model_state, params, invtemp=1.0):
+    def loss_fwd_nograd_fn(key, model_state, params):
         rnd_p = partial(rnd_partial_base, batch_size=batch_size, prior_to_target=True)
-        return loss_fn_base(key, model_state, params, rnd_p, invtemp=invtemp)
+        return loss_fn_base(key, model_state, params, rnd_p)
 
     ### Prepare eval function
     eval_fn, logger = get_eval_fn(
@@ -174,7 +187,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
             # Sample from model
             key, key_gen = jax.random.split(key_gen)
             grads, (samples, log_iws, log_rewards, losses) = loss_fwd_grad_fn(
-                key, model_state, model_state.params, invtemp=invtemp
+                key, model_state, model_state.params
             )
             model_state = model_state.apply_gradients(grads=grads)
 
@@ -226,7 +239,6 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
                 model_state.params,
                 samples,
                 log_rewards,
-                invtemp=invtemp,
             )
             model_state = model_state.apply_gradients(grads=grads)
 

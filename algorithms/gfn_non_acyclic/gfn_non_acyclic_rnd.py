@@ -24,6 +24,14 @@ def log_prob_kernel(x, mean, scale):
     return dist.log_prob(x)
 
 
+def clip_log_reward(log_reward, clip_value=-1e5):
+    return jnp.where(
+        log_reward > clip_value,
+        log_reward,
+        clip_value - jnp.log(clip_value - log_reward),
+    )
+
+
 def per_sample_rnd_no_term(
     key,
     model_state,
@@ -34,6 +42,8 @@ def per_sample_rnd_no_term(
     num_steps,
     prior_to_target=True,
 ):
+    (logr_clip,) = aux_tuple
+
     # @jax.checkpoint
     def model_forward(s, log_reward, langevin):
         return model_state.apply_fn(params, s, log_reward, langevin, predict_fwd=True)
@@ -51,6 +61,7 @@ def per_sample_rnd_no_term(
         s = jax.lax.stop_gradient(s)
 
         log_reward, langevin = compute_log_reward_and_langevin(s)
+        log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
         fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
             s, log_reward, langevin
         )
@@ -81,6 +92,7 @@ def per_sample_rnd_no_term(
         )
 
         log_reward, langevin = compute_log_reward_and_langevin(s)
+        log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
         fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
             s, log_reward, langevin
         )
@@ -209,6 +221,7 @@ def per_sample_rnd_with_term(
     initial_dist,
     prior_to_target=True,
 ):
+    (logr_clip,) = aux_tuple
 
     # @jax.checkpoint
     def model_forward(s, log_reward, langevin):
@@ -234,6 +247,7 @@ def per_sample_rnd_with_term(
 
         s = jax.lax.stop_gradient(s)
         log_reward, langevin = compute_log_reward_and_langevin(s)
+        log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
         fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
             s, log_reward, langevin
         )
@@ -309,6 +323,7 @@ def per_sample_rnd_with_term(
         )
 
         log_reward, langevin = compute_log_reward_and_langevin(s)
+        log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
         fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
             s, log_reward, langevin
         )
@@ -407,10 +422,13 @@ def rnd_with_term(
         input_states,
         aux_tuple,
         target,
-        num_steps,
+        num_steps - 2 if prior_to_target else num_steps - 1,
         initial_dist,
         prior_to_target,
     )
+
+    # forward: num_steps + 1 + 1
+    # backward: num_steps + 1
 
     if prior_to_target:
         trajectories_length = (~terminals_mask).sum(axis=1)
@@ -510,16 +528,15 @@ def get_step_fn(aux_tuple, target, name):
     def compute_log_reward_and_langevin(s):
         return jax.lax.stop_gradient(jax.value_and_grad(target.log_prob)(s))
 
+    (gamma,) = aux_tuple
+
     def ula_step(s, key_gen):
-        (gamma,) = aux_tuple
         langevin = jax.lax.stop_gradient(jax.grad(target.log_prob)(s))
         fwd_mean = s + langevin * gamma
         fwd_scale = jnp.sqrt(2 * gamma)
         return sample_kernel(key_gen, fwd_mean, fwd_scale)
 
     def mala_step(s, key_gen):
-        (gamma,) = aux_tuple
-
         log_reward, langevin = compute_log_reward_and_langevin(s)
         fwd_mean = s + langevin * gamma
         fwd_scale = jnp.sqrt(2 * gamma)
@@ -611,14 +628,12 @@ def rnd_cont(
     )
 
 
-def loss_fn(
+def loss_fn_db(
     key: RandomKey,
     model_state: TrainState,
     params: ModelParams,
     rnd_partial: Callable[[RandomKey, TrainState, ModelParams], tuple[Array, ...]],
     reg_coef: float = 0.0,
-    invtemp: float = 1.0,
-    logr_clip: float = -1e5,
     huber_delta: float | None = None,
 ):
     (
@@ -654,6 +669,80 @@ def loss_fn(
         jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),  # log(pb(s'->s)/pf(s->s'))
         -terminal_costs,  # log_rewards
         jax.lax.stop_gradient(db_losses),
+    )
+
+
+def loss_fn_subtb(
+    key: RandomKey,
+    model_state: TrainState,
+    params: ModelParams,
+    rnd_partial: Callable[[RandomKey, TrainState, ModelParams], tuple[Array, ...]],
+    n_chunks: int,
+    reg_coef: float = 0.0,
+    huber_delta: float | None = None,
+):
+    (
+        trajectories,
+        _,  # running costs
+        _,  # stochastic costs
+        terminal_costs,
+        trajectories_length,
+        log_pfs_over_pbs,
+        log_fs,
+    ) = rnd_partial(key, model_state, params)
+
+    bs, T = log_pfs_over_pbs.shape
+    assert T % n_chunks == 0
+    chunk_size = T // n_chunks
+
+    mask = jnp.arange(T)[None, :] < trajectories_length[:, None]
+    log_pfs_over_pbs = log_pfs_over_pbs * mask
+
+    chunk_starts = jnp.arange(0, T - 1, chunk_size)
+    chunk_ends = jnp.arange(chunk_size, T + 1, chunk_size)
+
+    valid_chunks = chunk_starts[None, :] < trajectories_length[:, None]
+    chunk_valid_ends = jnp.minimum(chunk_ends[None, :], trajectories_length[:, None])
+
+    log_fs_chunk_ends = jnp.take_along_axis(log_fs, chunk_valid_ends, axis=1)
+
+    subtb_discrepancy1 = (
+        log_fs[:, :-1:chunk_size]
+        + log_pfs_over_pbs.reshape(bs, n_chunks, -1).sum(-1)
+        - log_fs_chunk_ends
+    )
+    subtb_discrepancy1 = subtb_discrepancy1 * valid_chunks
+
+    log_pfs_over_pbs_cumsum = jnp.cumsum(log_pfs_over_pbs[:, ::-1], axis=-1)[:, ::-1]
+    subtb_discrepancy2 = (
+        log_fs[:, :-1:chunk_size]
+        + log_pfs_over_pbs_cumsum[:, ::chunk_size]
+        - log_fs[jnp.arange(bs), trajectories_length][:, None]
+    )
+    # TODO: Need weights here
+    subtb_discrepancy2 = subtb_discrepancy2 * valid_chunks
+    subtb_discrepancy = jnp.concatenate(
+        [subtb_discrepancy1, subtb_discrepancy2], axis=1
+    )
+
+    if huber_delta is not None:
+        subtb_losses = jnp.where(
+            jnp.abs(subtb_discrepancy) <= huber_delta,
+            jnp.square(subtb_discrepancy),
+            huber_delta * jnp.abs(subtb_discrepancy) - 0.5 * huber_delta**2,
+        )
+    else:
+        subtb_losses = jnp.square(subtb_discrepancy)
+
+    losses = subtb_losses.mean(-1) + reg_coef * log_fs[:, 1:].mean(-1)
+
+    return jnp.mean(losses), (
+        trajectories[
+            jnp.arange(trajectories.shape[0]), trajectories_length - 1
+        ],  # samples
+        jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),  # log(pb(s'->s)/pf(s->s'))
+        -terminal_costs,  # log_rewards
+        jax.lax.stop_gradient(subtb_losses),
     )
 
 
