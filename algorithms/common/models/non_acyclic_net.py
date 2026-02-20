@@ -65,7 +65,13 @@ class NonAcyclicNet(nn.Module):
                 ]
             )
 
-    def _parse_fwd_pred(self, s, model_output, lgv_term):
+    def _parse_fwd_pred(
+        self,
+        s,
+        model_output,
+        lgv_term,
+        force_stop=False,
+    ):
         if self.shared_model:
             model_output, _ = jnp.split(model_output, [self.fwd_pred_dim], axis=-1)
         if self.learn_fwd_corrections:
@@ -95,9 +101,12 @@ class NonAcyclicNet(nn.Module):
         if self.disable_clf:
             fwd_clf_logits = jnp.full_like(fwd_clf_logits, -100.0)
 
+        if force_stop:
+            fwd_clf_logits = jnp.full_like(fwd_clf_logits, 100.0)
+
         return fwd_clf_logits, fwd_mean, fwd_scale
 
-    def _parse_bwd_pred(self, s, model_output):
+    def _parse_bwd_pred(self, s, model_output, force_stop=False):
         if self.shared_model:
             _, model_output = jnp.split(model_output, [self.fwd_pred_dim], axis=-1)
 
@@ -120,6 +129,9 @@ class NonAcyclicNet(nn.Module):
         if self.disable_clf:
             bwd_clf_logits = jnp.full_like(bwd_clf_logits, -100.0)
 
+        if force_stop:
+            bwd_clf_logits = jnp.full_like(bwd_clf_logits, 100.0)
+
         return bwd_clf_logits, bwd_mean, bwd_scale
 
     def __call__(
@@ -129,6 +141,7 @@ class NonAcyclicNet(nn.Module):
         lgv_term=None,
         predict_fwd=False,
         predict_bwd=False,
+        force_stop=False,
     ):
         if predict_fwd:
             model_output = (
@@ -138,7 +151,10 @@ class NonAcyclicNet(nn.Module):
                 lgv_term = jnp.zeros_like(s)
             lgv_term = jnp.clip(lgv_term, -self.inner_clip, self.inner_clip)
             fwd_clf_logits, fwd_mean, fwd_scale = self._parse_fwd_pred(
-                s, model_output, lgv_term
+                s,
+                model_output,
+                lgv_term,
+                force_stop,
             )
             if log_reward is None:
                 log_flow = jnp.zeros_like(s[..., 0])
@@ -149,4 +165,4 @@ class NonAcyclicNet(nn.Module):
             model_output = (
                 self.state_net(s) if self.shared_model else self.bwd_state_net(s)
             )
-            return self._parse_bwd_pred(s, model_output)
+            return self._parse_bwd_pred(s, model_output, force_stop)

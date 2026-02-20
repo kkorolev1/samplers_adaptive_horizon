@@ -151,7 +151,7 @@ def rnd_no_term(
         input_states,
         aux_tuple,
         target,
-        num_steps,
+        num_steps - 1,
         prior_to_target,
     )
     if not prior_to_target:
@@ -224,12 +224,16 @@ def per_sample_rnd_with_term(
     (logr_clip,) = aux_tuple
 
     # @jax.checkpoint
-    def model_forward(s, log_reward, langevin):
-        return model_state.apply_fn(params, s, log_reward, langevin, predict_fwd=True)
+    def model_forward(s, log_reward, langevin, force_stop=False):
+        return model_state.apply_fn(
+            params, s, log_reward, langevin, predict_fwd=True, force_stop=force_stop
+        )
 
     # @jax.checkpoint
-    def model_backward(s_next):
-        return model_state.apply_fn(params, s_next, predict_bwd=True)
+    def model_backward(s_next, force_stop=False):
+        return model_state.apply_fn(
+            params, s_next, predict_bwd=True, force_stop=force_stop
+        )
 
     # @jax.checkpoint
     def compute_log_reward_and_langevin(s):
@@ -249,15 +253,15 @@ def per_sample_rnd_with_term(
         log_reward, langevin = compute_log_reward_and_langevin(s)
         log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
         fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
-            s, log_reward, langevin
+            s,
+            log_reward,
+            langevin,
+            force_stop=force_stop,
         )
         key, key_gen = jax.random.split(key_gen)
         is_terminal_next = is_terminal | jax.random.bernoulli(
             key, nn.sigmoid(fwd_clf_logits)
         )
-        if force_stop:
-            is_terminal_next = jnp.array(True)
-            fwd_clf_logits = jnp.array(100.0)
         s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
         s_next = jax.lax.stop_gradient(s_next)
         fwd_log_prob = log_prob_kernel(s_next, fwd_mean, fwd_scale) + nn.log_sigmoid(
@@ -302,14 +306,14 @@ def per_sample_rnd_with_term(
         s_next, is_terminal_next, key_gen, step = state
         trajectories, terminals_mask, fwd_log_probs, bwd_log_probs, log_fs = state_hist
         s_next = jax.lax.stop_gradient(s_next)
-        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next)
+        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(
+            s_next,
+            force_stop=force_stop,
+        )
         key, key_gen = jax.random.split(key_gen)
         is_terminal = is_terminal_next | jax.random.bernoulli(
             key, nn.sigmoid(bwd_clf_logits)
         )
-        if force_stop:
-            is_terminal = jnp.array(True)
-            bwd_clf_logits = jnp.array(100.0)
         s, key_gen = sample_kernel(key_gen, bwd_mean, bwd_scale)
         s = jax.lax.stop_gradient(s)
         bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + nn.log_sigmoid(
@@ -698,7 +702,7 @@ def loss_fn_subtb(
     mask = jnp.arange(T)[None, :] < trajectories_length[:, None]
     log_pfs_over_pbs = log_pfs_over_pbs * mask
 
-    chunk_starts = jnp.arange(0, T - 1, chunk_size)
+    chunk_starts = jnp.arange(0, T, chunk_size)
     chunk_ends = jnp.arange(chunk_size, T + 1, chunk_size)
 
     valid_chunks = chunk_starts[None, :] < trajectories_length[:, None]
