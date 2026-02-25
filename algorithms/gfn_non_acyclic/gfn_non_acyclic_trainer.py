@@ -125,9 +125,14 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         return loss_fn_base(key, model_state, params, rnd_p)
 
     # Define the function to be JIT-ed for FWD pass without gradients
-    @partial(jax.jit)
-    def loss_fwd_nograd_fn(key, model_state, params):
-        rnd_p = partial(rnd_partial_base, batch_size=batch_size, prior_to_target=True)
+    @partial(jax.jit, static_argnames=("disable_clf",))
+    def loss_fwd_nograd_fn(key, model_state, params, disable_clf=False):
+        rnd_p = partial(
+            rnd_partial_base,
+            batch_size=batch_size,
+            prior_to_target=True,
+            disable_clf=disable_clf,
+        )
         return loss_fn_base(key, model_state, params, rnd_p)
 
     ### Prepare eval function
@@ -145,7 +150,10 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         for _ in range(buffer_cfg.prefill_steps):
             key, key_gen = jax.random.split(key_gen)
             _, (samples, log_iws, log_rewards, losses) = loss_fwd_nograd_fn(
-                key, model_state, model_state.params
+                key,
+                model_state,
+                model_state.params,
+                disable_clf=True,
             )
             buffer_state = buffer.add(
                 buffer_state,

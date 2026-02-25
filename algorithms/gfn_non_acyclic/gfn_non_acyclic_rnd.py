@@ -220,19 +220,30 @@ def per_sample_rnd_with_term(
     num_steps,
     initial_dist,
     prior_to_target=True,
+    disable_clf=False,
 ):
     (logr_clip,) = aux_tuple
 
     # @jax.checkpoint
     def model_forward(s, log_reward, langevin, force_stop=False):
         return model_state.apply_fn(
-            params, s, log_reward, langevin, predict_fwd=True, force_stop=force_stop
+            params,
+            s,
+            log_reward,
+            langevin,
+            predict_fwd=True,
+            force_stop=force_stop,
+            disable_clf=disable_clf,
         )
 
     # @jax.checkpoint
     def model_backward(s_next, force_stop=False):
         return model_state.apply_fn(
-            params, s_next, predict_bwd=True, force_stop=force_stop
+            params,
+            s_next,
+            predict_bwd=True,
+            force_stop=force_stop,
+            disable_clf=disable_clf,
         )
 
     # @jax.checkpoint
@@ -408,6 +419,7 @@ def rnd_with_term(
     initial_dist: distrax.Distribution | None = None,
     terminal_xs: Array | None = None,
     log_rewards: Array | None = None,
+    disable_clf: bool = False,
 ):
     if prior_to_target:
         key, key_gen = jax.random.split(key_gen)
@@ -418,7 +430,7 @@ def rnd_with_term(
     keys = jax.random.split(key_gen, num=batch_size)
     trajectories, terminals_mask, fwd_log_probs, bwd_log_probs, log_fs = jax.vmap(
         per_sample_rnd_with_term,
-        in_axes=(0, None, None, 0, None, None, None, None, None),
+        in_axes=(0, None, None, 0, None, None, None, None, None, None),
     )(
         keys,
         model_state,
@@ -429,6 +441,7 @@ def rnd_with_term(
         num_steps - 2 if prior_to_target else num_steps - 1,
         initial_dist,
         prior_to_target,
+        disable_clf,
     )
 
     # forward: num_steps + 1 + 1
@@ -708,19 +721,26 @@ def loss_fn_subtb(
     valid_chunks = chunk_starts[None, :] < trajectories_length[:, None]
     chunk_valid_ends = jnp.minimum(chunk_ends[None, :], trajectories_length[:, None])
 
+    # Get chunk start flows - use take_along_axis to handle variable lengths correctly
+    chunk_starts_expanded = chunk_starts[None, :].repeat(bs, axis=0)
+    log_fs_chunk_starts = jnp.take_along_axis(log_fs, chunk_starts_expanded, axis=1)
     log_fs_chunk_ends = jnp.take_along_axis(log_fs, chunk_valid_ends, axis=1)
 
     subtb_discrepancy1 = (
-        log_fs[:, :-1:chunk_size]
+        log_fs_chunk_starts
         + log_pfs_over_pbs.reshape(bs, n_chunks, -1).sum(-1)
         - log_fs_chunk_ends
     )
     subtb_discrepancy1 = subtb_discrepancy1 * valid_chunks
 
     log_pfs_over_pbs_cumsum = jnp.cumsum(log_pfs_over_pbs[:, ::-1], axis=-1)[:, ::-1]
+    # Sample cumulative sums at chunk start positions
+    log_pfs_over_pbs_cumsum_at_chunks = jnp.take_along_axis(
+        log_pfs_over_pbs_cumsum, chunk_starts_expanded, axis=1
+    )
     subtb_discrepancy2 = (
-        log_fs[:, :-1:chunk_size]
-        + log_pfs_over_pbs_cumsum[:, ::chunk_size]
+        log_fs_chunk_starts
+        + log_pfs_over_pbs_cumsum_at_chunks
         - log_fs[jnp.arange(bs), trajectories_length][:, None]
     )
     # TODO: Need weights here

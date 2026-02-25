@@ -35,7 +35,6 @@ model:
   gamma: ${target.gfn_non_acyclic.gamma}
   learn_fwd_corrections: False
   shared_model: False
-  disable_clf: False
 
 buffer:
   use: True

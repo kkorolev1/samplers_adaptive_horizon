@@ -18,7 +18,6 @@ class NonAcyclicNet(nn.Module):
     bwd_log_var_range: float = 4.0
     learn_fwd_corrections: bool = False
     shared_model: bool = False
-    disable_clf: bool = False
 
     def setup(self):
         self.fwd_pred_dim = 1 + 3 * self.dim if self.learn_fwd_corrections else 1
@@ -71,6 +70,7 @@ class NonAcyclicNet(nn.Module):
         model_output,
         lgv_term,
         force_stop=False,
+        disable_clf=False,
     ):
         if self.shared_model:
             model_output, _ = jnp.split(model_output, [self.fwd_pred_dim], axis=-1)
@@ -98,7 +98,7 @@ class NonAcyclicNet(nn.Module):
         fwd_mean = jnp.clip(fwd_mean, -self.outer_clip, self.outer_clip)
         fwd_clf_logits = fwd_clf_logits.squeeze(-1)
 
-        if self.disable_clf:
+        if disable_clf:
             fwd_clf_logits = jnp.full_like(fwd_clf_logits, -100.0)
 
         if force_stop:
@@ -106,7 +106,7 @@ class NonAcyclicNet(nn.Module):
 
         return fwd_clf_logits, fwd_mean, fwd_scale
 
-    def _parse_bwd_pred(self, s, model_output, force_stop=False):
+    def _parse_bwd_pred(self, s, model_output, force_stop=False, disable_clf=False):
         if self.shared_model:
             _, model_output = jnp.split(model_output, [self.fwd_pred_dim], axis=-1)
 
@@ -126,7 +126,7 @@ class NonAcyclicNet(nn.Module):
         )
         bwd_clf_logits = bwd_clf_logits.squeeze(-1)
 
-        if self.disable_clf:
+        if disable_clf:
             bwd_clf_logits = jnp.full_like(bwd_clf_logits, -100.0)
 
         if force_stop:
@@ -142,6 +142,7 @@ class NonAcyclicNet(nn.Module):
         predict_fwd=False,
         predict_bwd=False,
         force_stop=False,
+        disable_clf=False,
     ):
         if predict_fwd:
             model_output = (
@@ -155,6 +156,7 @@ class NonAcyclicNet(nn.Module):
                 model_output,
                 lgv_term,
                 force_stop,
+                disable_clf,
             )
             if log_reward is None:
                 log_flow = jnp.zeros_like(s[..., 0])
@@ -165,4 +167,4 @@ class NonAcyclicNet(nn.Module):
             model_output = (
                 self.state_net(s) if self.shared_model else self.bwd_state_net(s)
             )
-            return self._parse_bwd_pred(s, model_output, force_stop)
+            return self._parse_bwd_pred(s, model_output, force_stop, disable_clf)
