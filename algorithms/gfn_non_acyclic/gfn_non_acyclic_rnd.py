@@ -645,6 +645,244 @@ def rnd_cont(
     )
 
 
+def per_sample_rnd_no_term_prefix_tb(
+    key,
+    model_state,
+    params,
+    input_state: Array,
+    aux_tuple,
+    target,
+    num_steps,
+    prior_to_target=True,
+):
+    (logr_clip,) = aux_tuple
+
+    # @jax.checkpoint
+    def model_forward(s, log_reward, langevin):
+        return model_state.apply_fn(params, s, log_reward, langevin, predict_fwd=True)
+
+    # @jax.checkpoint
+    def model_backward(s_next):
+        return model_state.apply_fn(params, s_next, predict_bwd=True)
+
+    # @jax.checkpoint
+    def compute_log_reward_and_langevin(s):
+        return jax.lax.stop_gradient(jax.value_and_grad(target.log_prob)(s))
+
+    def simulate_prior_to_target(state, per_step_input):
+        s, key_gen = state
+        s = jax.lax.stop_gradient(s)
+
+        log_reward, langevin = compute_log_reward_and_langevin(s)
+        log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
+        fwd_clf_logits, fwd_mean, fwd_scale, log_reward = model_forward(
+            s, log_reward, langevin
+        )
+        s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
+        s_next = jax.lax.stop_gradient(s_next)
+        fwd_log_prob = log_prob_kernel(s_next, fwd_mean, fwd_scale) + nn.log_sigmoid(
+            -fwd_clf_logits
+        )
+
+        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next)
+        bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jax.nn.log_sigmoid(
+            -bwd_clf_logits
+        )
+
+        # Return next state and per-step output
+        next_state = (s_next, key_gen)
+        per_step_output = (s, fwd_log_prob, bwd_log_prob, fwd_clf_logits, log_reward)
+        return next_state, per_step_output
+
+    def simulate_target_to_prior(state, per_step_input):
+        s_next, key_gen = state
+        s_next = jax.lax.stop_gradient(s_next)
+        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next)
+        s, key_gen = sample_kernel(key_gen, bwd_mean, bwd_scale)
+        s = jax.lax.stop_gradient(s)
+        bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jax.nn.log_sigmoid(
+            -bwd_clf_logits
+        )
+
+        log_reward, langevin = compute_log_reward_and_langevin(s)
+        log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
+        fwd_clf_logits, fwd_mean, fwd_scale, log_reward = model_forward(
+            s, log_reward, langevin
+        )
+        fwd_log_prob = log_prob_kernel(
+            s_next, fwd_mean, fwd_scale
+        ) + jax.nn.log_sigmoid(-fwd_clf_logits)
+
+        next_state = (s, key_gen)
+        per_step_output = (s, fwd_log_prob, bwd_log_prob, fwd_clf_logits, log_reward)
+        return next_state, per_step_output
+
+    if prior_to_target:
+        init_x = input_state
+        aux = (init_x, key)
+        aux, per_step_output = jax.lax.scan(
+            simulate_prior_to_target, aux, jnp.arange(num_steps)
+        )
+        terminal_x, _ = aux
+    else:
+        terminal_x = input_state
+        aux = (terminal_x, key)
+        aux, per_step_output = jax.lax.scan(
+            simulate_target_to_prior, aux, jnp.arange(num_steps)
+        )
+    trajectory, fwd_log_prob, bwd_log_prob, fwd_clf_logits, log_reward = per_step_output
+    return (
+        terminal_x,
+        trajectory,
+        fwd_log_prob,
+        bwd_log_prob,
+        fwd_clf_logits,
+        log_reward,
+    )
+
+
+def rnd_no_term_prefix_tb(
+    key_gen,
+    model_state,
+    params,
+    batch_size,
+    aux_tuple,
+    target,
+    num_steps,
+    prior_to_target=True,
+    initial_dist: distrax.Distribution | None = None,
+    terminal_xs: Array | None = None,
+    log_rewards: Array | None = None,
+    disable_clf: bool | None = True,
+):
+    if prior_to_target:
+        key, key_gen = jax.random.split(key_gen)
+        input_states = initial_dist.sample(seed=key, sample_shape=(batch_size,))
+    else:
+        input_states = terminal_xs
+
+    keys = jax.random.split(key_gen, num=batch_size)
+    (
+        terminal_xs,
+        trajectories,
+        fwd_log_probs,
+        bwd_log_probs,
+        fwd_clf_logits,
+        log_rewards_traj,
+    ) = jax.vmap(
+        per_sample_rnd_no_term_prefix_tb,
+        in_axes=(0, None, None, 0, None, None, None, None),
+    )(
+        keys,
+        model_state,
+        params,
+        input_states,
+        aux_tuple,
+        target,
+        num_steps - 1,
+        prior_to_target,
+    )
+    if not prior_to_target:
+        trajectories = trajectories[:, ::-1]
+        fwd_log_probs = fwd_log_probs[:, ::-1]
+        bwd_log_probs = bwd_log_probs[:, ::-1]
+        fwd_clf_logits = fwd_clf_logits[:, ::-1]
+        log_rewards_traj = log_rewards_traj[:, ::-1]
+
+    trajectories = jnp.concatenate([trajectories, terminal_xs[:, None]], axis=1)
+
+    if log_rewards is None:
+        log_rewards = target.log_prob(terminal_xs)
+    log_rewards_traj = jnp.concatenate([log_rewards_traj, log_rewards[:, None]], axis=1)
+
+    if initial_dist is None:  # pinned_brownian
+        init_fwd_log_probs = jnp.zeros(batch_size)
+    else:
+        init_fwd_log_probs = initial_dist.log_prob(trajectories[:, 0])
+
+    # We need to calculate log flow for the last continuous xs
+    terminal_xs = jax.lax.stop_gradient(terminal_xs)
+    terminal_fwd_clf_logits, *_ = model_state.apply_fn(
+        params, terminal_xs, log_rewards, predict_fwd=True
+    )
+    fwd_clf_logits = jnp.concatenate(
+        [fwd_clf_logits, terminal_fwd_clf_logits[:, None]], axis=1
+    )
+
+    # We need to calculate bwd_log_prob for the first continuous xs
+    init_xs = jax.lax.stop_gradient(trajectories[:, 0])
+    bwd_clf_logits, *_ = model_state.apply_fn(params, init_xs, predict_bwd=True)
+
+    fwd_log_probs = jnp.concatenate(
+        [init_fwd_log_probs[:, None], fwd_log_probs], axis=1
+    )
+    bwd_log_probs = jnp.concatenate(
+        [nn.log_sigmoid(bwd_clf_logits)[:, None], bwd_log_probs], axis=1
+    )
+
+    log_pfs_over_pbs = fwd_log_probs - bwd_log_probs
+
+    return (
+        trajectories,
+        log_pfs_over_pbs.sum(1),  # running costs
+        jnp.zeros_like(log_rewards),  # stochastic costs
+        -log_rewards,  # terminal costs
+        (num_steps + 1) * jnp.ones((batch_size,), dtype=int),
+        log_pfs_over_pbs,
+        (fwd_clf_logits, log_rewards_traj),
+    )
+
+
+def loss_fn_prefix_tb(
+    key: RandomKey,
+    model_state: TrainState,
+    params: ModelParams,
+    rnd_partial: Callable[[RandomKey, TrainState, ModelParams], tuple[Array, ...]],
+    reg_coef: float = 0.0,
+    huber_delta: float | None = None,
+):
+    (
+        trajectories,
+        _,  # running costs
+        _,  # stochastic costs
+        terminal_costs,
+        trajectories_length,
+        log_pfs_over_pbs,
+        (fwd_clf_logits, log_rewards_traj),
+    ) = rnd_partial(key, model_state, params)
+
+    logZ = params["params"]["logZ"]
+
+    fwd_clf_log_probs = jax.nn.log_sigmoid(fwd_clf_logits)
+    discrepancy = (
+        logZ
+        + jnp.cumsum(log_pfs_over_pbs, axis=1)
+        + fwd_clf_log_probs
+        - log_rewards_traj
+    )
+    log_fs = fwd_clf_log_probs - log_rewards_traj
+
+    if huber_delta is not None:
+        tb_losses = jnp.where(
+            jnp.abs(discrepancy) <= huber_delta,
+            jnp.square(discrepancy),
+            huber_delta * jnp.abs(discrepancy) - 0.5 * huber_delta**2,
+        )
+    else:
+        tb_losses = jnp.square(discrepancy)
+
+    losses = tb_losses.mean(-1) + reg_coef * log_fs.mean(-1)
+
+    return jnp.mean(losses), (
+        trajectories[
+            jnp.arange(trajectories.shape[0]), trajectories_length - 1
+        ],  # samples
+        jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),  # log(pb(s'->s)/pf(s->s'))
+        -terminal_costs,  # log_rewards
+        jax.lax.stop_gradient(tb_losses),
+    )
+
+
 def loss_fn_db(
     key: RandomKey,
     model_state: TrainState,

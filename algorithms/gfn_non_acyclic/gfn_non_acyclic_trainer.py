@@ -18,8 +18,10 @@ from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import (
     rnd_no_term,
     rnd_with_term,
     rnd_cont,
+    rnd_no_term_prefix_tb,
     loss_fn_db,
     loss_fn_subtb,
+    loss_fn_prefix_tb,
 )
 from algorithms.gfn_non_acyclic.utils import get_invtemp
 from eval.utils import extract_last_entry
@@ -61,9 +63,15 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
     key, key_gen = jax.random.split(key_gen)
     model_state = init_model(key, dim, alg_cfg)
 
+    if alg_cfg.loss_type == "tb":
+        rnd_train = rnd_no_term_prefix_tb
+    elif alg_cfg.no_term:
+        rnd_train = rnd_no_term
+    else:
+        rnd_train = rnd_with_term
+
     rnd_partial_base = partial(
-        # trajectories sampled without / with termination resp.
-        rnd_no_term if alg_cfg.no_term else rnd_with_term,
+        rnd_train,
         aux_tuple=aux_tuple,
         target=target,
         num_steps=num_steps,
@@ -97,6 +105,12 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
             loss_fn_subtb,
             huber_delta=alg_cfg.huber_delta,
             n_chunks=alg_cfg.n_chunks,
+            reg_coef=reg_coef,
+        )
+    elif alg_cfg.loss_type == "tb":
+        loss_fn_base = partial(
+            loss_fn_prefix_tb,
+            huber_delta=alg_cfg.huber_delta,
             reg_coef=reg_coef,
         )
     else:
