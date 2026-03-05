@@ -854,13 +854,14 @@ def loss_fn_prefix_tb(
     logZ = params["params"]["logZ"]
 
     fwd_clf_log_probs = jax.nn.log_sigmoid(fwd_clf_logits)
+
     discrepancy = (
         logZ
         + jnp.cumsum(log_pfs_over_pbs, axis=1)
         + fwd_clf_log_probs
         - log_rewards_traj
     )
-    log_fs = fwd_clf_log_probs - log_rewards_traj
+    log_fs = log_rewards_traj - fwd_clf_log_probs
 
     if huber_delta is not None:
         tb_losses = jnp.where(
@@ -871,7 +872,7 @@ def loss_fn_prefix_tb(
     else:
         tb_losses = jnp.square(discrepancy)
 
-    losses = tb_losses.mean(-1) + reg_coef * log_fs.mean(-1)
+    losses = tb_losses.mean(-1) + reg_coef * jnp.exp(log_fs).mean(-1)
 
     return jnp.mean(losses), (
         trajectories[
@@ -915,7 +916,7 @@ def loss_fn_db(
     else:
         db_losses = jnp.square(db_discrepancy)
 
-    losses = db_losses.mean(-1) + reg_coef * log_fs[:, 1:].mean(-1)
+    losses = db_losses.mean(-1) + reg_coef * jnp.exp(log_fs[:, 1:]).mean(-1)
 
     return jnp.mean(losses), (
         trajectories[
@@ -996,7 +997,7 @@ def loss_fn_subtb(
     else:
         subtb_losses = jnp.square(subtb_discrepancy)
 
-    losses = subtb_losses.mean(-1) + reg_coef * log_fs[:, 1:].mean(-1)
+    losses = subtb_losses.mean(-1) + reg_coef * jnp.exp(log_fs[:, 1:]).mean(-1)
 
     return jnp.mean(losses), (
         trajectories[
