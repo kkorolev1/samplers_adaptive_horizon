@@ -840,6 +840,7 @@ def loss_fn_prefix_tb(
     rnd_partial: Callable[[RandomKey, TrainState, ModelParams], tuple[Array, ...]],
     reg_coef: float = 0.0,
     huber_delta: float | None = None,
+    use_weights: bool = True,
 ):
     (
         trajectories,
@@ -863,6 +864,25 @@ def loss_fn_prefix_tb(
     )
     log_fs = log_rewards_traj - fwd_clf_log_probs
 
+    if use_weights:
+        log_weights = (
+            jnp.cumsum(
+                jnp.concatenate(
+                    [
+                        jnp.zeros((fwd_clf_logits.shape[0], 1)),
+                        jax.nn.log_sigmoid(-fwd_clf_logits)[:, :-1],
+                    ],
+                    axis=1,
+                ),
+                axis=1,
+            )
+            + fwd_clf_log_probs
+        )
+        weights = jnp.exp(jax.lax.stop_gradient(log_weights))
+        weights = weights / weights.sum(-1, keepdims=True)
+    else:
+        weights = jnp.ones((fwd_clf_logits.shape[0], 1)) / fwd_clf_logits.shape[1]
+
     if huber_delta is not None:
         tb_losses = jnp.where(
             jnp.abs(discrepancy) <= huber_delta,
@@ -872,7 +892,8 @@ def loss_fn_prefix_tb(
     else:
         tb_losses = jnp.square(discrepancy)
 
-    losses = tb_losses.mean(-1) + reg_coef * jnp.exp(log_fs).mean(-1)
+    tb_losses = tb_losses * weights
+    losses = tb_losses.sum(-1) + reg_coef * jnp.exp(log_fs).mean(-1)
 
     return jnp.mean(losses), (
         trajectories[
