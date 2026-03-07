@@ -63,6 +63,19 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
     key, key_gen = jax.random.split(key_gen)
     model_state = init_model(key, dim, alg_cfg)
 
+    # Print number of parameters in the model
+    def count_params(params):
+        # Recursively count all parameter array elements
+        if isinstance(params, dict):
+            return sum(count_params(p) for p in params.values())
+        elif hasattr(params, "size"):
+            return params.size
+        else:
+            return 0
+
+    num_params = count_params(model_state.params)
+    print(f"Number of model parameters: {num_params}")
+
     if alg_cfg.loss_type == "tb":
         rnd_train = rnd_no_term_prefix_tb
     elif alg_cfg.no_term:
