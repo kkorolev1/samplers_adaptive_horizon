@@ -157,6 +157,64 @@ def visualize_trajectories(
         plt.close()
     return wb
 
+def visualize_flow_clf_heatmap(
+    model_state,
+    target,
+    device="cpu",
+    alpha=0.9,
+    shrink=1.0,
+    prefix="",
+    show=False,
+):
+    fig = plt.figure(figsize=(6, 6))
+    ax = fig.add_subplot()
+
+    bounds = (-target._plot_bound, target._plot_bound)
+    x = jnp.linspace(*bounds, 50)
+    y = jnp.linspace(*bounds, 50)
+    X, Y = jnp.meshgrid(x, y, indexing="xy")
+    grid = jnp.stack([X.ravel(), Y.ravel()], axis=1)
+    grid = jax.device_put(grid, device)
+
+    log_reward = target.log_prob(grid)
+    fwd_clf_logits, *_ = model_state.apply_fn(
+        model_state.params,
+        grid,
+        log_reward=log_reward,
+        predict_fwd=True,
+    )
+    bwd_clf_logits, *_ = model_state.apply_fn(
+        model_state.params,
+        grid,
+        predict_bwd=True,
+    )
+    log_flow = log_rewards - nn.log_sigmoid(fwd_clf_logits)
+    log_prod = log_flow + nn.log_sigmoid(bwd_clf_logits)
+    prod = jnp.exp(log_prod).reshape(X.shape)
+
+    im = ax.pcolormesh(X, Y, prod, cmap="viridis", alpha=alpha, shading="auto")
+    cbar = fig.colorbar(
+        im,
+        shrink=shrink,
+        label="F(s) * D_B(s)",
+        fraction=0.046,
+        pad=0.04,
+    )
+    cbar.ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:.2f}"))
+
+    ax.set_xlabel("x1")
+    ax.set_ylabel("x2")
+    ax.grid(True, linestyle="--", alpha=0.6)
+    ax.set_xlim((x.min(), x.max()))
+    ax.set_ylim((y.min(), y.max()))
+    ax.set_aspect("equal", adjustable="box")
+
+    wb = {f"figures/{prefix + '_' if prefix else ''}vis": [wandb.Image(fig)]}
+    if show:
+        plt.show()
+    else:
+        plt.close()
+    return wb
 
 def get_eval_fn(rnd, target, target_xs, cfg):
     rnd_reverse = jax.jit(partial(rnd, prior_to_target=True))
@@ -276,6 +334,14 @@ def get_eval_fn(rnd, target, target_xs, cfg):
                     is_forward=False,
                     device=samples.device,
                     prefix="bwd_clf",
+                )
+            )
+            logger.update(
+                visualize_flow_clf_heatmap(
+                    model_state,
+                    target,
+                    device=samples.device,
+                    prefix="flow_bwd_clf",
                 )
             )
         logger.update(
