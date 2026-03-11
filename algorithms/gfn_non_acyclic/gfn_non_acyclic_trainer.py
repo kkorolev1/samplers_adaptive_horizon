@@ -23,7 +23,6 @@ from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import (
     loss_fn_subtb,
     loss_fn_prefix_tb,
 )
-from algorithms.gfn_non_acyclic.utils import get_invtemp
 from eval.utils import extract_last_entry
 from utils.print_utils import print_results
 
@@ -213,10 +212,6 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
     off_policy_iters = 0
     ### Training phase
     for it in range(alg_cfg.iters):
-        invtemp = get_invtemp(
-            it, alg_cfg.iters // 2, alg_cfg.init_invtemp, (alg_cfg.init_invtemp < 1.0)
-        )
-
         # On-policy training with forward samples
         if not use_buffer or it % (buffer_cfg.bwd_to_fwd_ratio + 1) == 0:
             # Sample from model
