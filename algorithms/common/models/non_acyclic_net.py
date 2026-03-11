@@ -18,6 +18,7 @@ class NonAcyclicNet(nn.Module):
     bwd_log_var_range: float = 4.0
     learn_fwd_corrections: bool = False
     shared_model: bool = False
+    return_flow: bool = False
 
     def setup(self):
         self.fwd_pred_dim = 1 + 3 * self.dim if self.learn_fwd_corrections else 1
@@ -158,11 +159,12 @@ class NonAcyclicNet(nn.Module):
                 force_stop,
                 disable_clf,
             )
-            # if log_reward is None:
-            #     log_flow = jnp.zeros_like(s[..., 0])
-            # else:
-            #     log_flow = log_reward - nn.log_sigmoid(fwd_clf_logits)
-            # return fwd_clf_logits, fwd_mean, fwd_scale, log_flow
+            if self.return_flow:
+                if log_reward is None:
+                    log_flow = jnp.zeros_like(s[..., 0])
+                else:
+                    log_flow = log_reward - nn.log_sigmoid(fwd_clf_logits)
+                return fwd_clf_logits, fwd_mean, fwd_scale, log_flow
             return fwd_clf_logits, fwd_mean, fwd_scale, log_reward
         if predict_bwd:
             model_output = (
