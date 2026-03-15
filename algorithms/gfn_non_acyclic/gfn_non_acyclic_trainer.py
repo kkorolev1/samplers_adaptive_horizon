@@ -39,6 +39,16 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
 
     target_xs = target.sample(jax.random.PRNGKey(0), (cfg.eval_samples,))
 
+    from eval.discrepancies import compute_sd
+
+    target_sds = []
+    for i in range(5):
+        samples1 = target.sample(jax.random.PRNGKey(2 * i), (cfg.eval_samples,))
+        samples2 = target.sample(jax.random.PRNGKey(2 * i + 1), (cfg.eval_samples,))
+        target_sds.append(compute_sd(samples1, samples2, None))
+    target_sds = jnp.array(target_sds)
+    print(f"target SD mean={jnp.mean(target_sds):.3f} std={jnp.std(target_sds):.3f}")
+
     initial_dist = distrax.MultivariateNormalDiag(
         jnp.zeros(dim), jnp.ones(dim) * alg_cfg.init_std
     )
