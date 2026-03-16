@@ -223,7 +223,10 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
     ### Training phase
     for it in range(alg_cfg.iters):
         # On-policy training with forward samples
-        if not use_buffer or it % (buffer_cfg.bwd_to_fwd_ratio + 1) == 0:
+        is_on_policy_iter = (
+            not use_buffer or it % (buffer_cfg.bwd_to_fwd_ratio + 1) == 0
+        )
+        if is_on_policy_iter:
             # Sample from model
             key, key_gen = jax.random.split(key_gen)
             grads, (samples, log_iws, log_rewards, losses) = loss_fwd_grad_fn(
@@ -305,6 +308,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
             exp.log_metrics(
                 {
                     "loss": jnp.mean(losses),
+                    ("loss_fwd" if is_on_policy_iter else "loss_bwd"): jnp.mean(losses),
                     "logZ_learned": model_state.params["params"]["logZ"],
                     "params_l2_norm": params_norm,
                     "grads_l2_norm": grads_norm,

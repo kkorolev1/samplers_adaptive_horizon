@@ -840,7 +840,7 @@ def loss_fn_prefix_tb(
     rnd_partial: Callable[[RandomKey, TrainState, ModelParams], tuple[Array, ...]],
     reg_coef: float = 0.0,
     huber_delta: float | None = None,
-    use_weights: bool = False,
+    use_weights: bool = True,
 ):
     (
         trajectories,

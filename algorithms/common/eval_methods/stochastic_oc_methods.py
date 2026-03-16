@@ -157,6 +157,7 @@ def visualize_trajectories(
         plt.close()
     return wb
 
+
 def visualize_flow_clf_heatmap(
     model_state,
     target,
@@ -215,6 +216,7 @@ def visualize_flow_clf_heatmap(
     else:
         plt.close()
     return wb
+
 
 def visualize_flow_clf_heatmap(
     model_state,
@@ -347,14 +349,12 @@ def get_eval_fn(rnd, target, target_xs, cfg):
 
         if cfg.compute_forward_metrics and target.can_sample:
             (
-                _,
+                fwd_trajectories,
                 fwd_running_costs,
                 _,
                 _,
                 fwd_trajectories_length,
-            ) = rnd_forward(
-                jax.random.PRNGKey(0), model_state, *params
-            )[:5]
+            ) = rnd_forward(jax.random.PRNGKey(0), model_state, *params)[:5]
             fwd_log_is_weights = -fwd_running_costs
             fwd_ln_z = jax.scipy.special.logsumexp(fwd_log_is_weights) - jnp.log(
                 cfg.eval_samples
@@ -411,9 +411,20 @@ def get_eval_fn(rnd, target, target_xs, cfg):
                 target,
                 dims=(0, 1),
                 device=samples.device,
-                prefix="trajectories",
+                prefix="trajectories_fwd",
             )
         )
+        if cfg.compute_forward_metrics and target.can_sample:
+            logger.update(
+                visualize_trajectories(
+                    fwd_trajectories[:10],
+                    fwd_trajectories_length[:10],
+                    target,
+                    dims=(0, 1),
+                    device=samples.device,
+                    prefix="trajectories_bwd",
+                )
+            )
 
         if cfg.compute_emc and cfg.target.has_entropy:
             logger["other/EMC"].append(target.entropy(samples))
