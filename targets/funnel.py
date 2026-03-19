@@ -19,6 +19,7 @@ class Funnel(Target):
         self.mean_other = jnp.zeros(dim - 1, dtype=float)
         self.cov_eye = jnp.eye(dim - 1).reshape((1, dim - 1, dim - 1))
         self.sample_bounds = sample_bounds
+        self._plot_bound = 5.0
 
     def log_prob(self, x: chex.Array):
         batched = x.ndim == 2
@@ -30,7 +31,9 @@ class Funnel(Target):
 
         log_sigma = 0.5 * x[:, 0:1]
         sigma2 = jnp.exp(x[:, 0:1])
-        neglog_density_other = 0.5 * jnp.log(2 * jnp.pi) + log_sigma + 0.5 * x[:, 1:] ** 2 / sigma2
+        neglog_density_other = (
+            0.5 * jnp.log(2 * jnp.pi) + log_sigma + 0.5 * x[:, 1:] ** 2 / sigma2
+        )
         log_density_other = jnp.sum(-neglog_density_other, axis=-1)
 
         log_prob = log_density_dominant + log_density_other
@@ -40,7 +43,9 @@ class Funnel(Target):
 
     def sample(self, seed: chex.PRNGKey, sample_shape: chex.Shape = ()) -> chex.Array:
         key1, key2 = jax.random.split(seed)
-        dominant_x = self.dist_dominant.sample(seed=key1, sample_shape=sample_shape)  # (B,1)
+        dominant_x = self.dist_dominant.sample(
+            seed=key1, sample_shape=sample_shape
+        )  # (B,1)
         x_others = self._dist_other(dominant_x).sample(seed=key2)  # (B, dim-1)
         if self.sample_bounds is not None:
             return jnp.hstack([dominant_x, x_others]).clip(
@@ -56,7 +61,11 @@ class Funnel(Target):
         return distrax.MultivariateNormalFullCovariance(self.mean_other, cov_other)
 
     def visualise(
-        self, samples: chex.Array = None, axes: List[plt.Axes] = None, show=False, prefix=""
+        self,
+        samples: chex.Array = None,
+        axes: List[plt.Axes] = None,
+        show=False,
+        prefix="",
     ) -> dict:
         plt.close()
         fig = plt.figure()

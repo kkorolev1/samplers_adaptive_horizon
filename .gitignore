@@ -192,3 +192,6 @@ utils/prior_gif.gif
 # Slurm
 scripts/
 slurm_logs/
+
+.cometml-runs/**
+.DS_Store
