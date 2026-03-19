@@ -204,7 +204,7 @@ def rnd_no_term(
         log_pfs_over_pbs.sum(1),  # running costs
         jnp.zeros_like(log_rewards),  # stochastic costs
         -log_rewards,  # terminal costs
-        (num_steps + 1) * jnp.ones((batch_size,), dtype=int),
+        trajectories.shape[1] * jnp.ones((batch_size,), dtype=int),
         log_pfs_over_pbs,
         log_fs,
     )
@@ -675,7 +675,7 @@ def per_sample_rnd_no_term_prefix_tb(
 
         log_reward, langevin = compute_log_reward_and_langevin(s)
         log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
-        fwd_clf_logits, fwd_mean, fwd_scale, log_reward = model_forward(
+        fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
             s, log_reward, langevin
         )
         s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
@@ -691,7 +691,7 @@ def per_sample_rnd_no_term_prefix_tb(
 
         # Return next state and per-step output
         next_state = (s_next, key_gen)
-        per_step_output = (s, fwd_log_prob, bwd_log_prob, fwd_clf_logits, log_reward)
+        per_step_output = (s, fwd_log_prob, bwd_log_prob, fwd_clf_logits, log_f)
         return next_state, per_step_output
 
     def simulate_target_to_prior(state, per_step_input):
@@ -706,7 +706,7 @@ def per_sample_rnd_no_term_prefix_tb(
 
         log_reward, langevin = compute_log_reward_and_langevin(s)
         log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
-        fwd_clf_logits, fwd_mean, fwd_scale, log_reward = model_forward(
+        fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
             s, log_reward, langevin
         )
         fwd_log_prob = log_prob_kernel(
@@ -714,7 +714,7 @@ def per_sample_rnd_no_term_prefix_tb(
         ) + jax.nn.log_sigmoid(-fwd_clf_logits)
 
         next_state = (s, key_gen)
-        per_step_output = (s, fwd_log_prob, bwd_log_prob, fwd_clf_logits, log_reward)
+        per_step_output = (s, fwd_log_prob, bwd_log_prob, fwd_clf_logits, log_f)
         return next_state, per_step_output
 
     if prior_to_target:
@@ -730,14 +730,14 @@ def per_sample_rnd_no_term_prefix_tb(
         aux, per_step_output = jax.lax.scan(
             simulate_target_to_prior, aux, jnp.arange(num_steps)
         )
-    trajectory, fwd_log_prob, bwd_log_prob, fwd_clf_logits, log_reward = per_step_output
+    trajectory, fwd_log_prob, bwd_log_prob, fwd_clf_logits, log_f = per_step_output
     return (
         terminal_x,
         trajectory,
         fwd_log_prob,
         bwd_log_prob,
         fwd_clf_logits,
-        log_reward,
+        log_f,
     )
 
 
@@ -768,7 +768,7 @@ def rnd_no_term_prefix_tb(
         fwd_log_probs,
         bwd_log_probs,
         fwd_clf_logits,
-        log_rewards_traj,
+        log_fs,
     ) = jax.vmap(
         per_sample_rnd_no_term_prefix_tb,
         in_axes=(0, None, None, 0, None, None, None, None),
@@ -787,13 +787,12 @@ def rnd_no_term_prefix_tb(
         fwd_log_probs = fwd_log_probs[:, ::-1]
         bwd_log_probs = bwd_log_probs[:, ::-1]
         fwd_clf_logits = fwd_clf_logits[:, ::-1]
-        log_rewards_traj = log_rewards_traj[:, ::-1]
+        log_fs = log_fs[:, ::-1]
 
     trajectories = jnp.concatenate([trajectories, terminal_xs[:, None]], axis=1)
 
     if log_rewards is None:
         log_rewards = target.log_prob(terminal_xs)
-    log_rewards_traj = jnp.concatenate([log_rewards_traj, log_rewards[:, None]], axis=1)
 
     if initial_dist is None:  # pinned_brownian
         init_fwd_log_probs = jnp.zeros(batch_size)
@@ -802,12 +801,13 @@ def rnd_no_term_prefix_tb(
 
     # We need to calculate log flow for the last continuous xs
     terminal_xs = jax.lax.stop_gradient(terminal_xs)
-    terminal_fwd_clf_logits, *_ = model_state.apply_fn(
+    terminal_fwd_clf_logits, _, _, terminal_log_fs = model_state.apply_fn(
         params, terminal_xs, log_rewards, predict_fwd=True
     )
     fwd_clf_logits = jnp.concatenate(
         [fwd_clf_logits, terminal_fwd_clf_logits[:, None]], axis=1
     )
+    log_fs = jnp.concatenate([log_fs, terminal_log_fs[:, None]], axis=1)
 
     # We need to calculate bwd_log_prob for the first continuous xs
     init_xs = jax.lax.stop_gradient(trajectories[:, 0])
@@ -827,9 +827,9 @@ def rnd_no_term_prefix_tb(
         log_pfs_over_pbs.sum(1),  # running costs
         jnp.zeros_like(log_rewards),  # stochastic costs
         -log_rewards,  # terminal costs
-        (num_steps + 1) * jnp.ones((batch_size,), dtype=int),
+        trajectories.shape[1] * jnp.ones((batch_size,), dtype=int),
         log_pfs_over_pbs,
-        (fwd_clf_logits, log_rewards_traj),
+        (fwd_clf_logits, log_fs),
     )
 
 
@@ -847,22 +847,15 @@ def loss_fn_prefix_tb(
         _,  # running costs
         _,  # stochastic costs
         terminal_costs,
-        trajectories_length,
+        _,
         log_pfs_over_pbs,
-        (fwd_clf_logits, log_rewards_traj),
+        (fwd_clf_logits, log_fs),
     ) = rnd_partial(key, model_state, params)
 
     logZ = params["params"]["logZ"]
 
     fwd_clf_log_probs = jax.nn.log_sigmoid(fwd_clf_logits)
-
-    discrepancy = (
-        logZ
-        + jnp.cumsum(log_pfs_over_pbs, axis=1)
-        + fwd_clf_log_probs
-        - log_rewards_traj
-    )
-    log_fs = log_rewards_traj - fwd_clf_log_probs
+    discrepancy = logZ + jnp.cumsum(log_pfs_over_pbs, axis=1) - log_fs
 
     if use_weights:
         log_weights = (
@@ -878,10 +871,14 @@ def loss_fn_prefix_tb(
             )
             + fwd_clf_log_probs
         )
-        weights = jnp.exp(jax.lax.stop_gradient(log_weights))
-        weights = weights / weights.sum(-1, keepdims=True)
+        log_weights = jax.lax.stop_gradient(log_weights)
+        log_weights = log_weights - jax.scipy.special.logsumexp(
+            log_weights, axis=1, keepdims=True
+        )
     else:
-        weights = jnp.ones((fwd_clf_logits.shape[0], 1)) / fwd_clf_logits.shape[1]
+        log_weights = -jnp.log(fwd_clf_logits.shape[1]) * jnp.ones(
+            (fwd_clf_logits.shape[0], 1)
+        )
 
     if huber_delta is not None:
         tb_losses = jnp.where(
@@ -892,13 +889,11 @@ def loss_fn_prefix_tb(
     else:
         tb_losses = jnp.square(discrepancy)
 
-    tb_losses = tb_losses * weights
-    losses = tb_losses.sum(-1) + reg_coef * jnp.exp(log_fs).mean(-1)
+    tb_losses = tb_losses * jnp.exp(log_weights)
+    losses = tb_losses.sum(-1) + reg_coef * jnp.exp(log_fs + log_weights).sum(-1)
 
     return jnp.mean(losses), (
-        trajectories[
-            jnp.arange(trajectories.shape[0]), trajectories_length - 1
-        ],  # samples
+        trajectories[:, -1],  # samples
         jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),  # log(pb(s'->s)/pf(s->s'))
         -terminal_costs,  # log_rewards
         jax.lax.stop_gradient(tb_losses),
