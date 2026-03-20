@@ -438,106 +438,58 @@ def rnd_with_term(
         input_states,
         aux_tuple,
         target,
-        num_steps - 2 if prior_to_target else num_steps - 1,
+        num_steps - 1,
         initial_dist,
         prior_to_target,
         disable_clf,
     )
 
-    # forward: num_steps + 1 + 1
-    # backward: num_steps + 1
+    running_costs = jnp.sum(fwd_log_probs - bwd_log_probs, axis=1)
 
     if prior_to_target:
         trajectories_length = (~terminals_mask).sum(axis=1)
         terminal_xs = trajectories[
             jnp.arange(trajectories.shape[0]), trajectories_length - 1
         ]
-
         # We need to add fwd/bwd_log_prob for the first continuous xs
         # fmt: off
         init_xs = jax.lax.stop_gradient(input_states)
         init_fwd_log_probs = initial_dist.log_prob(init_xs)
         bwd_clf_logits, *_ = model_state.apply_fn(params, init_xs, predict_bwd=True)
 
-        fwd_log_probs = jnp.concatenate(
-            [init_fwd_log_probs[:, None], fwd_log_probs], axis=1
-        )
-        bwd_log_probs = jnp.concatenate(
-            [nn.log_sigmoid(bwd_clf_logits)[:, None], bwd_log_probs], axis=1
-        )
-        log_fs = jnp.concatenate(
-            [
-                jnp.zeros_like(init_fwd_log_probs)[:, None],  # set to logZ later
-                log_fs,
-                jnp.zeros_like(init_fwd_log_probs)[:, None], # reward is already in bwd_log_probs
-            ],
-            axis=1,
-        )
+        running_costs = running_costs + init_fwd_log_probs - nn.log_sigmoid(bwd_clf_logits)
     else:
         # fmt: off
-        terminals_mask = jnp.concatenate([jnp.zeros((terminals_mask.shape[0], 1), dtype=terminals_mask.dtype), terminals_mask[:, :-1]], axis=1)
-
-        trajectories_length = (~terminals_mask).sum(axis=1)
-
+        
+        # account +1 for the terminal from which we started
+        trajectories_length = (~terminals_mask).sum(axis=1) + 1
         trajectories = trajectories[:, ::-1]
         terminals_mask = terminals_mask[:, ::-1]
-        fwd_log_probs = fwd_log_probs[:, ::-1]
-        bwd_log_probs = bwd_log_probs[:, ::-1]
-        log_fs = log_fs[:, ::-1]
 
         indices = (~terminals_mask).argsort(axis=1, descending=True, stable=True)
         trajectories = jnp.take_along_axis(trajectories, indices[:,:,None], axis=1)
-        fwd_log_probs = jnp.take_along_axis(fwd_log_probs, indices, axis=1)
-        bwd_log_probs = jnp.take_along_axis(bwd_log_probs, indices, axis=1)
-        log_fs = jnp.take_along_axis(log_fs, indices, axis=1)
 
         if log_rewards is None:
             log_rewards = target.log_prob(terminal_xs)
 
-        log_fs = jnp.concatenate(
-            [
-                log_fs,
-                jnp.zeros_like(log_rewards)[:, None],
-            ],
-            axis=1,
-        )
-
         terminal_xs = jax.lax.stop_gradient(terminal_xs)
-        *_, terminal_log_fs = model_state.apply_fn(params, terminal_xs, log_rewards, predict_fwd=True)
-        log_fs = log_fs.at[jnp.arange(log_fs.shape[0]), trajectories_length].set(
-            terminal_log_fs
-        )
-        trajectories = jnp.concatenate(
-            [
-                trajectories[:, 1:],
-                jnp.zeros_like(trajectories[:, 0:1]),
-            ],
-            axis=1,
-        )
+        fwd_clf_logits, *_ = model_state.apply_fn(params, terminal_xs, predict_fwd=True)
+        running_costs = running_costs + nn.log_sigmoid(fwd_clf_logits) - log_rewards
         trajectories = trajectories.at[jnp.arange(trajectories.shape[0]), trajectories_length - 1].set(
             terminal_xs
         )
 
-    logZ = params["params"]["logZ"]
-    log_fs = log_fs.at[:, 0].set(logZ)
-
     if log_rewards is None:
         log_rewards = target.log_prob(terminal_xs)
 
-    # jax.debug.print(
-    #     f"Max Length: {fwd_log_probs.shape}, {bwd_log_probs.shape}, {bwd_log_probs.shape}"
-    # )
-    # jax.debug.print(f"Mean Length: {trajectories_length.mean()}")
-
-    log_pfs_over_pbs = fwd_log_probs - bwd_log_probs
     return (
         trajectories,
-        log_pfs_over_pbs.sum(1),  # running costs
+        running_costs,  # running costs
         jnp.zeros_like(log_rewards),  # stochastic costs
         -log_rewards,  # terminal costs
         trajectories_length,
-        log_pfs_over_pbs,
-        log_fs,
+        jnp.zeros_like(log_rewards),  # not used
+        jnp.zeros_like(log_rewards),  # not used
     )
 
 

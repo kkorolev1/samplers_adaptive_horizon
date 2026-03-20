@@ -52,6 +52,10 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
     initial_dist = distrax.MultivariateNormalDiag(
         jnp.zeros(dim), jnp.ones(dim) * alg_cfg.init_std
     )
+    # alg_cfg.init_std = jnp.sqrt(0.1)
+    # initial_dist = distrax.MultivariateNormalDiag(
+    #     jnp.ones(dim), jnp.ones(dim) * alg_cfg.init_std
+    # )
     aux_tuple = (alg_cfg.logr_clip,)
 
     # Initialize the buffer
@@ -87,10 +91,8 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
 
     if alg_cfg.loss_type == "tb":
         rnd_train = rnd_no_term_prefix_tb
-    elif alg_cfg.no_term:
-        rnd_train = rnd_no_term
     else:
-        rnd_train = rnd_with_term
+        rnd_train = rnd_no_term
 
     rnd_partial_base = partial(
         rnd_train,
