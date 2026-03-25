@@ -37,6 +37,13 @@ class NonAcyclicNet(nn.Module):
                 ]
             )
         else:
+            self.backbone = nn.Sequential(
+                [
+                    nn.Sequential([nn.Dense(self.num_hid), nn.gelu])
+                    for _ in range(self.num_layers)
+                ]
+            )
+
             self.fwd_state_net = nn.Sequential(
                 [
                     nn.Sequential([nn.Dense(self.num_hid), nn.gelu])
@@ -72,6 +79,9 @@ class NonAcyclicNet(nn.Module):
         force_stop=False,
         disable_clf=False,
     ):
+        if lgv_term is None:
+            lgv_term = jnp.zeros_like(s)
+        lgv_term = jnp.clip(lgv_term, -self.inner_clip, self.inner_clip)
         if self.shared_model:
             model_output, _ = jnp.split(model_output, [self.fwd_pred_dim], axis=-1)
         if self.learn_fwd_corrections:
@@ -86,7 +96,7 @@ class NonAcyclicNet(nn.Module):
                 axis=-1,
             )
             # fmt: off
-            fwd_mean = s + (fwd_mean_corr + (1 + fwd_lgv_scale) * lgv_term) * self.gamma
+            fwd_mean = s + jnp.clip(fwd_mean_corr + (1 + fwd_lgv_scale) * lgv_term, -self.outer_clip, self.outer_clip) * self.gamma
             fwd_scale = jnp.sqrt(
                 2 * jnp.exp(self.fwd_log_var_range * nn.tanh(fwd_scale_corr)) * self.gamma
             )
@@ -146,11 +156,10 @@ class NonAcyclicNet(nn.Module):
     ):
         if predict_fwd:
             model_output = (
-                self.state_net(s) if self.shared_model else self.fwd_state_net(s)
+                self.state_net(s)
+                if self.shared_model
+                else self.fwd_state_net(self.backbone(s))
             )
-            if lgv_term is None:
-                lgv_term = jnp.zeros_like(s)
-            lgv_term = jnp.clip(lgv_term, -self.inner_clip, self.inner_clip)
             fwd_clf_logits, fwd_mean, fwd_scale = self._parse_fwd_pred(
                 s,
                 model_output,
@@ -165,6 +174,8 @@ class NonAcyclicNet(nn.Module):
             return fwd_clf_logits, fwd_mean, fwd_scale, log_flow
         if predict_bwd:
             model_output = (
-                self.state_net(s) if self.shared_model else self.bwd_state_net(s)
+                self.state_net(s)
+                if self.shared_model
+                else self.bwd_state_net(self.backbone(s))
             )
             return self._parse_bwd_pred(s, model_output, force_stop, disable_clf)

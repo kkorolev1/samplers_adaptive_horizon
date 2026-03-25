@@ -28,17 +28,20 @@ class Gaussian(Target):
         seed = jax.random.PRNGKey(0)
 
         # set mixture components
-        locs = jax.random.uniform(seed, minval=min_mean_val, maxval=max_mean_val, shape=(dim,))
-        seed, subkey = random.split(seed)
+        # locs = jax.random.uniform(seed, minval=min_mean_val, maxval=max_mean_val, shape=(dim,))
+        # seed, subkey = random.split(seed)
 
-        # Set the random seed for Scipy
-        seed_value = random.randint(key=subkey, shape=(), minval=0, maxval=2**30)
-        np.random.seed(seed_value)
+        # # Set the random seed for Scipy
+        # seed_value = random.randint(key=subkey, shape=(), minval=0, maxval=2**30)
+        # np.random.seed(seed_value)
 
-        cov_matrix = wishart.rvs(df=degree_of_freedom_wishart, scale=jnp.eye(dim))
+        # cov_matrix = wishart.rvs(df=degree_of_freedom_wishart, scale=jnp.eye(dim))
+        locs = jnp.zeros((dim,))
+        cov_matrix = jnp.eye(dim)
 
         self.pdf = dist.MultivariateNormal(locs, jnp.array(cov_matrix))
         # self.pdf = dist.MultivariateNormal(jnp.zeros(self.dim), 2.5 **2 * jnp.eye(self.dim))
+        self._plot_bound = 5
 
     def sample(self, seed: chex.PRNGKey, sample_shape: chex.Shape) -> chex.Array:
         return self.pdf.sample(key=seed, sample_shape=sample_shape)
@@ -48,7 +51,11 @@ class Gaussian(Target):
         return log_prob
 
     def visualise(
-        self, samples: chex.Array = None, axes: List[plt.Axes] = None, show=False, clip=False
+        self,
+        samples: chex.Array = None,
+        axes: List[plt.Axes] = None,
+        show=False,
+        clip=False,
     ) -> None:
         plt.close()
         boarder = [-15, 15]
@@ -58,14 +65,17 @@ class Gaussian(Target):
             ax = fig.add_subplot()
 
             x, y = jnp.meshgrid(
-                jnp.linspace(boarder[0], boarder[1], 100), jnp.linspace(boarder[0], boarder[1], 100)
+                jnp.linspace(boarder[0], boarder[1], 100),
+                jnp.linspace(boarder[0], boarder[1], 100),
             )
             grid = jnp.c_[x.ravel(), y.ravel()]
             pdf_values = jax.vmap(jnp.exp)(self.log_prob(grid))
             pdf_values = jnp.reshape(pdf_values, x.shape)
             ax.contourf(x, y, pdf_values, levels=20, cmap="viridis")
             if samples is not None:
-                plt.scatter(samples[:300, 0], samples[:300, 1], c="r", alpha=0.5, marker="x")
+                plt.scatter(
+                    samples[:300, 0], samples[:300, 1], c="r", alpha=0.5, marker="x"
+                )
             # plt.xlabel('X')
             # plt.ylabel('Y')
             # plt.colorbar()

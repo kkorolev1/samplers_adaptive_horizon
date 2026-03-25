@@ -1,5 +1,5 @@
 name: gaussian_mixture40
-num_components: 40
+num_components: 20
 dim: 50
 has_entropy: True
 
@@ -10,7 +10,7 @@ fn:
   log_Z: 0.
   can_sample: True
   sample_bounds: None
-  loc_scaling: 40
+  loc_scaling: 10
   scale_scaling: 1
 
 # Experiment-specific algorithm parameters
@@ -104,7 +104,7 @@ gfn_subtb: # Sub-Trajectory Balance
   flow_num_hid: 256
 
 gfn_non_acyclic:
-  init_std: 40.0
+  init_std: 1.0
   weight_decay: 0.0
   step_size: 1e-3
   bwd_step_size: 1e-3
