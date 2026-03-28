@@ -364,9 +364,11 @@ def loss_fn_subtb(
     else:
         subtb_losses = jnp.square(subtb_discrepancy)
 
-    return jnp.mean(subtb_losses.mean(-1)), (
-        trajectories,
-        jax.lax.stop_gradient(-log_pfs_over_pbs),
+    losses = subtb_losses.mean(-1) + reg_coef * jnp.exp(log_fs[:, 1:]).mean(-1)
+
+    return jnp.mean(losses), (
+        trajectories[:, -1],
+        jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),
         log_rewards,
         jax.lax.stop_gradient(subtb_losses),
     )
