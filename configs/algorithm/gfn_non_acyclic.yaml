@@ -15,8 +15,8 @@ init_std: ${target.gfn_non_acyclic.init_std}  # for ou
 logr_clip: ${target.gfn_non_acyclic.logr_clip}
 huber_delta: ${target.gfn_non_acyclic.huber_delta}
 reg_coef: ${target.gfn_non_acyclic.reg_coef}
-no_term: ${target.gfn_non_acyclic.no_term}
 eval_max_steps: ${target.gfn_non_acyclic.eval_max_steps}
+use_weights: True
 
 # Learning rate scheduler
 lr_schedule:

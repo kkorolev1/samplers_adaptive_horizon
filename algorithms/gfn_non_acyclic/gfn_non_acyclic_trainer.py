@@ -15,10 +15,9 @@ from algorithms.common.diffusion_related.init_model import init_model
 from algorithms.common.eval_methods.stochastic_oc_methods import get_eval_fn
 from algorithms.gfn_non_acyclic.buffer import build_terminal_state_buffer
 from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import (
-    rnd_no_term,
-    rnd_with_term,
-    rnd_cont,
-    rnd_no_term_prefix_tb,
+    rnd_train,
+    rnd_mcmc,
+    rnd_eval,
     loss_fn_db,
     loss_fn_subtb,
     loss_fn_prefix_tb,
@@ -89,11 +88,6 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
     num_params = count_params(model_state.params)
     print(f"Number of model parameters: {num_params}")
 
-    if alg_cfg.loss_type == "tb":
-        rnd_train = rnd_no_term_prefix_tb
-    else:
-        rnd_train = rnd_no_term
-
     rnd_partial_base = partial(
         rnd_train,
         aux_tuple=aux_tuple,
@@ -103,7 +97,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
     )
     local_search_cfg = alg_cfg.local_search
     rnd_local_search_partial_base = partial(
-        rnd_cont,
+        rnd_mcmc,
         batch_size=batch_size,
         aux_tuple=(local_search_cfg.gamma,),
         target=target,
@@ -112,7 +106,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         initial_dist=initial_dist,
     )
     rnd_eval_partial_base = partial(
-        rnd_with_term,
+        rnd_eval,
         aux_tuple=aux_tuple,
         target=target,
         num_steps=alg_cfg.eval_max_steps,
@@ -136,6 +130,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
             loss_fn_prefix_tb,
             huber_delta=alg_cfg.huber_delta,
             reg_coef=reg_coef,
+            use_weights=alg_cfg.use_weights,
         )
     else:
         raise ValueError(f"Unknown loss type {alg_cfg.loss_type}")
@@ -163,13 +158,12 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         return loss_fn_base(key, model_state, params, rnd_p)
 
     # Define the function to be JIT-ed for FWD pass without gradients
-    @partial(jax.jit, static_argnames=("disable_clf",))
-    def loss_fwd_nograd_fn(key, model_state, params, disable_clf=False):
+    @partial(jax.jit)
+    def loss_fwd_nograd_fn(key, model_state, params):
         rnd_p = partial(
             rnd_partial_base,
             batch_size=batch_size,
             prior_to_target=True,
-            disable_clf=disable_clf,
         )
         return loss_fn_base(key, model_state, params, rnd_p)
 
@@ -191,7 +185,6 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
                 key,
                 model_state,
                 model_state.params,
-                disable_clf=True,
             )
             buffer_state = buffer.add(
                 buffer_state,

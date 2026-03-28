@@ -16,7 +16,6 @@ logr_clip: -1e5
 huber_delta: 1e2
 step_name: "ula"
 reg_coef: ${target.gfn_non_acyclic.reg_coef}
-no_term: False
 eval_max_steps: 1000
 
 # Learning rate scheduler

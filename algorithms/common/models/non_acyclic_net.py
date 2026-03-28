@@ -46,28 +46,24 @@ class NonAcyclicNet(nn.Module):
 
             self.fwd_state_net = nn.Sequential(
                 [
-                    nn.Sequential([nn.Dense(self.num_hid), nn.gelu])
-                    for _ in range(self.num_layers)
-                ]
-                + [
+                    nn.Dense(self.num_hid),
+                    nn.gelu,
                     nn.Dense(
                         self.fwd_pred_dim,
                         kernel_init=nn.initializers.constant(1e-8),
                         bias_init=nn.initializers.zeros_init(),
-                    )
+                    ),
                 ]
             )
             self.bwd_state_net = nn.Sequential(
                 [
-                    nn.Sequential([nn.Dense(self.num_hid), nn.gelu])
-                    for _ in range(self.num_layers)
-                ]
-                + [
+                    nn.Dense(self.num_hid),
+                    nn.gelu,
                     nn.Dense(
                         self.bwd_pred_dim,
                         kernel_init=nn.initializers.constant(1e-8),
                         bias_init=nn.initializers.zeros_init(),
-                    )
+                    ),
                 ]
             )
 
@@ -77,7 +73,6 @@ class NonAcyclicNet(nn.Module):
         model_output,
         lgv_term,
         force_stop=False,
-        disable_clf=False,
     ):
         if lgv_term is None:
             lgv_term = jnp.zeros_like(s)
@@ -108,15 +103,12 @@ class NonAcyclicNet(nn.Module):
         fwd_mean = jnp.clip(fwd_mean, -self.outer_clip, self.outer_clip)
         fwd_clf_logits = fwd_clf_logits.squeeze(-1)
 
-        if disable_clf:
-            fwd_clf_logits = jnp.full_like(fwd_clf_logits, -100.0)
-
         if force_stop:
             fwd_clf_logits = jnp.full_like(fwd_clf_logits, 100.0)
 
         return fwd_clf_logits, fwd_mean, fwd_scale
 
-    def _parse_bwd_pred(self, s, model_output, force_stop=False, disable_clf=False):
+    def _parse_bwd_pred(self, s, model_output, force_stop=False):
         if self.shared_model:
             _, model_output = jnp.split(model_output, [self.fwd_pred_dim], axis=-1)
 
@@ -136,9 +128,6 @@ class NonAcyclicNet(nn.Module):
         )
         bwd_clf_logits = bwd_clf_logits.squeeze(-1)
 
-        if disable_clf:
-            bwd_clf_logits = jnp.full_like(bwd_clf_logits, -100.0)
-
         if force_stop:
             bwd_clf_logits = jnp.full_like(bwd_clf_logits, 100.0)
 
@@ -152,7 +141,6 @@ class NonAcyclicNet(nn.Module):
         predict_fwd=False,
         predict_bwd=False,
         force_stop=False,
-        disable_clf=False,
     ):
         if predict_fwd:
             model_output = (
@@ -165,7 +153,6 @@ class NonAcyclicNet(nn.Module):
                 model_output,
                 lgv_term,
                 force_stop,
-                disable_clf,
             )
             if log_reward is None:
                 log_flow = jnp.zeros_like(s[..., 0])
@@ -178,4 +165,4 @@ class NonAcyclicNet(nn.Module):
                 if self.shared_model
                 else self.bwd_state_net(self.backbone(s))
             )
-            return self._parse_bwd_pred(s, model_output, force_stop, disable_clf)
+            return self._parse_bwd_pred(s, model_output, force_stop)

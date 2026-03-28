@@ -121,7 +121,6 @@ gfn_non_acyclic:
   logr_clip: -1e5
   huber_delta: null
   grad_clip: 1.0
-  no_term: False
 
 all: # Parameters that are shared between all algorithms
   batch_size: 2000
