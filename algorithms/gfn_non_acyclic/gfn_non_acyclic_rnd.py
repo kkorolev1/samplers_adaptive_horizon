@@ -216,12 +216,10 @@ def rnd_train(
 
     return (
         trajectories,
-        log_pfs_over_pbs.sum(1),  # running costs
-        jnp.zeros_like(log_rewards),  # stochastic costs
-        -log_rewards,  # terminal costs
-        trajectories.shape[1] * jnp.ones((batch_size,), dtype=int),
+        log_rewards,
         log_pfs_over_pbs,
-        (fwd_clf_logits, log_fs),
+        fwd_clf_logits,
+        log_fs,
     )
 
 
@@ -234,15 +232,9 @@ def loss_fn_prefix_tb(
     huber_delta: float | None = None,
     use_weights: bool = True,
 ):
-    (
-        trajectories,
-        _,  # running costs
-        _,  # stochastic costs
-        terminal_costs,
-        _,
-        log_pfs_over_pbs,
-        (fwd_clf_logits, log_fs),
-    ) = rnd_partial(key, model_state, params)
+    (trajectories, log_rewards, log_pfs_over_pbs, fwd_clf_logits, log_fs) = rnd_partial(
+        key, model_state, params
+    )
 
     fwd_clf_log_probs = jax.nn.log_sigmoid(fwd_clf_logits)
     logZ = params["params"]["logZ"]
@@ -283,9 +275,9 @@ def loss_fn_prefix_tb(
     losses = tb_losses.sum(-1) + reg_coef * (jnp.exp(log_fs[:, 1:]) * weights).sum(-1)
 
     return jnp.mean(losses), (
-        trajectories[:, -1],  # samples
-        jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),  # log(pb(s'->s)/pf(s->s'))
-        -terminal_costs,  # log_rewards
+        trajectories[:, -1],
+        jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),
+        log_rewards,
         jax.lax.stop_gradient(tb_losses),
     )
 
@@ -298,20 +290,12 @@ def loss_fn_db(
     reg_coef: float = 0.0,
     huber_delta: float | None = None,
 ):
-    (
-        trajectories,
-        _,  # running costs
-        _,  # stochastic costs
-        terminal_costs,
-        trajectories_length,
-        log_pfs_over_pbs,
-        (fwd_clf_logits, log_fs),
-    ) = rnd_partial(key, model_state, params)
+    (trajectories, log_rewards, log_pfs_over_pbs, fwd_clf_logits, log_fs) = rnd_partial(
+        key, model_state, params
+    )
 
     db_discrepancy = log_fs[:, :-1] + log_pfs_over_pbs - log_fs[:, 1:]
-    # Only keep the db_discrepancy values corresponding to valid steps; others set to 0.
-    mask = jnp.arange(db_discrepancy.shape[1])[None, :] < trajectories_length[:, None]
-    db_discrepancy = db_discrepancy * mask
+    db_discrepancy = db_discrepancy
 
     if huber_delta is not None:
         db_losses = jnp.where(
@@ -325,11 +309,9 @@ def loss_fn_db(
     losses = db_losses.mean(-1) + reg_coef * jnp.exp(log_fs[:, 1:]).mean(-1)
 
     return jnp.mean(losses), (
-        trajectories[
-            jnp.arange(trajectories.shape[0]), trajectories_length - 1
-        ],  # samples
-        jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),  # log(pb(s'->s)/pf(s->s'))
-        -terminal_costs,  # log_rewards
+        trajectories[:, -1],
+        jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),
+        log_rewards,
         jax.lax.stop_gradient(db_losses),
     )
 
@@ -343,53 +325,32 @@ def loss_fn_subtb(
     reg_coef: float = 0.0,
     huber_delta: float | None = None,
 ):
-    (
-        trajectories,
-        _,  # running costs
-        _,  # stochastic costs
-        terminal_costs,
-        trajectories_length,
-        log_pfs_over_pbs,
-        (fwd_clf_logits, log_fs),
-    ) = rnd_partial(key, model_state, params)
+    (trajectories, log_rewards, log_pfs_over_pbs, fwd_clf_logits, log_fs) = rnd_partial(
+        key, model_state, params
+    )
 
     bs, T = log_pfs_over_pbs.shape
     assert T % n_chunks == 0
     chunk_size = T // n_chunks
 
-    mask = jnp.arange(T)[None, :] < trajectories_length[:, None]
-    log_pfs_over_pbs = log_pfs_over_pbs * mask
-
-    chunk_starts = jnp.arange(0, T, chunk_size)
-    chunk_ends = jnp.arange(chunk_size, T + 1, chunk_size)
-
-    valid_chunks = chunk_starts[None, :] < trajectories_length[:, None]
-    chunk_valid_ends = jnp.minimum(chunk_ends[None, :], trajectories_length[:, None])
-
-    # Get chunk start flows - use take_along_axis to handle variable lengths correctly
-    chunk_starts_expanded = chunk_starts[None, :].repeat(bs, axis=0)
-    log_fs_chunk_starts = jnp.take_along_axis(log_fs, chunk_starts_expanded, axis=1)
-    log_fs_chunk_ends = jnp.take_along_axis(log_fs, chunk_valid_ends, axis=1)
-
+    # db_discrepancy = log_fs[:, :-1] + log_pfs_over_pbs - log_fs[:, 1:]
+    # subtb_discrepancy1 = db_discrepancy.reshape(bs, n_chunks, -1).sum(-1)
+    # The below is equivalent to the above lines but avoids numerical instability.
     subtb_discrepancy1 = (
-        log_fs_chunk_starts
+        log_fs[:, :-1:chunk_size]
         + log_pfs_over_pbs.reshape(bs, n_chunks, -1).sum(-1)
-        - log_fs_chunk_ends
+        - log_fs[:, chunk_size::chunk_size]
     )
-    subtb_discrepancy1 = subtb_discrepancy1 * valid_chunks
 
     log_pfs_over_pbs_cumsum = jnp.cumsum(log_pfs_over_pbs[:, ::-1], axis=-1)[:, ::-1]
-    # Sample cumulative sums at chunk start positions
-    log_pfs_over_pbs_cumsum_at_chunks = jnp.take_along_axis(
-        log_pfs_over_pbs_cumsum, chunk_starts_expanded, axis=1
-    )
     subtb_discrepancy2 = (
-        log_fs_chunk_starts
-        + log_pfs_over_pbs_cumsum_at_chunks
-        - log_fs[jnp.arange(bs), trajectories_length][:, None]
-    )
-    # TODO: Need weights here
-    subtb_discrepancy2 = subtb_discrepancy2 * valid_chunks
+        log_fs[:, :-1:chunk_size]
+        + log_pfs_over_pbs_cumsum[:, ::chunk_size]
+        - log_fs[:, [-1]]
+    ) / jnp.arange(1, n_chunks + 1)[None, ::-1]
+
+    # subtb_discrepancy = subtb_discrepancy1
+    # subtb_discrepancy = subtb_discrepancy2
     subtb_discrepancy = jnp.concatenate(
         [subtb_discrepancy1, subtb_discrepancy2], axis=1
     )
@@ -403,14 +364,10 @@ def loss_fn_subtb(
     else:
         subtb_losses = jnp.square(subtb_discrepancy)
 
-    losses = subtb_losses.mean(-1) + reg_coef * jnp.exp(log_fs[:, 1:]).mean(-1)
-
-    return jnp.mean(losses), (
-        trajectories[
-            jnp.arange(trajectories.shape[0]), trajectories_length - 1
-        ],  # samples
-        jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),  # log(pb(s'->s)/pf(s->s'))
-        -terminal_costs,  # log_rewards
+    return jnp.mean(subtb_losses.mean(-1)), (
+        trajectories,
+        jax.lax.stop_gradient(-log_pfs_over_pbs),
+        log_rewards,
         jax.lax.stop_gradient(subtb_losses),
     )
 
@@ -669,12 +626,9 @@ def rnd_eval(
 
     return (
         trajectories,
-        running_costs,  # running costs
-        jnp.zeros_like(log_rewards),  # stochastic costs
-        -log_rewards,  # terminal costs
+        running_costs,
+        log_rewards,
         trajectories_length,
-        jnp.zeros_like(log_rewards),  # not used
-        jnp.zeros_like(log_rewards),  # not used
     )
 
 
@@ -746,7 +700,6 @@ def rnd_mcmc(
     target,
     num_steps,
     step_name,
-    prior_to_target=True,
     initial_dist: distrax.Distribution | None = None,
     terminal_xs: Array | None = None,
     log_rewards: Array | None = None,
@@ -773,12 +726,9 @@ def rnd_mcmc(
 
     return (
         trajectories,
-        jnp.zeros_like(log_rewards),  # running costs
-        jnp.zeros_like(log_rewards),  # stochastic costs
-        -log_rewards,  # terminal costs
-        num_steps * jnp.ones((batch_size,), dtype=int),
         jnp.zeros_like(log_rewards),
-        jnp.zeros_like(log_rewards),
+        log_rewards,
+        num_steps * jnp.ones((trajectories.shape[0],), dtype=int),
     )
 
 

@@ -13,7 +13,7 @@ import wandb
 
 from algorithms.common.diffusion_related.init_model import init_model
 from algorithms.common.eval_methods.stochastic_oc_methods import get_eval_fn
-from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import rnd_cont
+from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import rnd_mcmc
 from eval.utils import extract_last_entry
 from utils.print_utils import print_results
 
@@ -37,7 +37,7 @@ def gfn_non_acyclic_baseline(cfg, target, exp=None):
     model_state = init_model(key, dim, alg_cfg)
 
     rnd_eval_partial_base = partial(
-        rnd_cont,
+        rnd_mcmc,
         aux_tuple=aux_tuple,
         target=target,
         num_steps=alg_cfg.eval_max_steps,

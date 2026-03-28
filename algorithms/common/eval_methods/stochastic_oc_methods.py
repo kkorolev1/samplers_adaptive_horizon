@@ -315,11 +315,8 @@ def get_eval_fn(rnd, target, target_xs, cfg):
             trajectories,
             running_costs,
             _,
-            _,
             trajectories_length,
-        ) = rnd_reverse(
-            key, model_state, *params
-        )[:5]
+        ) = rnd_reverse(key, model_state, *params)
         samples = trajectories[
             jnp.arange(trajectories.shape[0]), trajectories_length - 1
         ]
@@ -340,7 +337,6 @@ def get_eval_fn(rnd, target, target_xs, cfg):
             (
                 fwd_trajectories,
                 fwd_running_costs,
-                _,
                 _,
                 fwd_trajectories_length,
             ) = rnd_forward(jax.random.PRNGKey(0), model_state, *params)[:5]

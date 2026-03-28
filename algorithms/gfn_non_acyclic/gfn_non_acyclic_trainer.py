@@ -248,21 +248,17 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
             if local_search_cfg.use and off_policy_iters % local_search_cfg.cycle == 0:
                 # jax.debug.print(f"{it}, {off_policy_iters}")
                 key, key_gen = jax.random.split(key_gen)
-                trajectories, _, _, terminal_costs, trajectories_length, *_ = (
-                    rnd_local_search_partial_base(
-                        key,
-                        model_state,
-                        model_state.params,
-                    )
+                trajectories, _, log_rewards, _ = rnd_local_search_partial_base(
+                    key,
+                    model_state,
+                    model_state.params,
                 )
                 buffer_state = buffer.add(
                     buffer_state,
-                    trajectories[
-                        jnp.arange(trajectories.shape[0]), trajectories_length - 1
-                    ],
-                    jnp.zeros_like(terminal_costs),
-                    -terminal_costs,  # log_rewards
-                    jnp.zeros_like(terminal_costs),
+                    trajectories[:, -1],
+                    jnp.zeros_like(log_rewards),
+                    log_rewards,
+                    jnp.zeros_like(log_rewards),
                 )
 
             # Sample terminal states from buffer
