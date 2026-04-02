@@ -1,4 +1,0 @@
-ng_estimator_type: "Stein"
-ng_estimator_config:
-  only_use_own_samples: False
-  use_self_normalized_importance_weights: True

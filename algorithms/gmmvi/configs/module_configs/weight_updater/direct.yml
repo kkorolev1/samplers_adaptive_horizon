@@ -1,4 +1,0 @@
-weight_updater_type: "direct"
-weight_updater_config:
-  use_self_normalized_importance_weights: True
-  
