@@ -181,7 +181,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         # logZ_estimates = []
         for _ in range(buffer_cfg.prefill_steps):
             key, key_gen = jax.random.split(key_gen)
-            _, (samples, log_iws, log_rewards, losses) = loss_fwd_nograd_fn(
+            _, (samples, log_iws, log_rewards, losses, *_) = loss_fwd_nograd_fn(
                 key,
                 model_state,
                 model_state.params,
@@ -224,8 +224,8 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         if is_on_policy_iter:
             # Sample from model
             key, key_gen = jax.random.split(key_gen)
-            grads, (samples, log_iws, log_rewards, losses) = loss_fwd_grad_fn(
-                key, model_state, model_state.params
+            grads, (samples, log_iws, log_rewards, losses, *loss_weights) = (
+                loss_fwd_grad_fn(key, model_state, model_state.params)
             )
             model_state = model_state.apply_gradients(grads=grads)
 
@@ -267,7 +267,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
 
             # Get grads with the off-policy samples
             key, key_gen = jax.random.split(key_gen)
-            grads, (_, log_pbs_over_pfs, _, losses) = loss_bwd_grad_fn(
+            grads, (_, log_pbs_over_pfs, _, losses, *loss_weights) = loss_bwd_grad_fn(
                 key,
                 model_state,
                 model_state.params,
@@ -313,6 +313,19 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
             logger["stats/nfe"].append((it + 1) * batch_size)  # FIXME
 
             logger.update(eval_fn(model_state, key))
+
+            if cfg.use_cometml and len(loss_weights) > 0:
+                import matplotlib.pyplot as plt
+                import numpy as np
+
+                fig = plt.figure(figsize=(6, 6))
+                ax = fig.add_subplot()
+                loss_weights_np = np.array(loss_weights[0])
+                ax.bar(range(loss_weights_np.shape[1]), loss_weights_np.mean(axis=0))
+                ax.set_xlabel("Step")
+                ax.set_ylabel("Mean loss weight")
+                logger.update({"figures/loss_weights": [wandb.Image(fig)]})
+                plt.close(fig)
 
             # Evaluate buffer samples
             if use_buffer:

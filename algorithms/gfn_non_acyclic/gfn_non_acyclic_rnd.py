@@ -279,6 +279,7 @@ def loss_fn_prefix_tb(
         jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),
         log_rewards,
         jax.lax.stop_gradient(tb_losses),
+        weights,
     )
 
 
