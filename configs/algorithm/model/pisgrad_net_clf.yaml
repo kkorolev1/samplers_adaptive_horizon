@@ -1,0 +1,19 @@
+dim: ${target.dim}
+
+num_layers: 4
+num_hid: 128
+outer_clip: 1e4
+inner_clip: 1e2
+
+weight_init: 1e-8
+bias_init: 0.1
+
+shared_model: False
+
+use_lp: True
+base_var: ${target.diff_sampler_clf.base_var}
+num_steps: ${target.diff_sampler_clf.num_steps}
+
+fwd_scale_scalar: 4.0
+bwd_mean_scalar: 0.9
+bwd_scale_scalar: 0.9

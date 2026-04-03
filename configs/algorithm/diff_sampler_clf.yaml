@@ -1,0 +1,43 @@
+# Generative Flow Networks (GFN) with Trajectory Balance (TB) loss
+name: diff_sampler_clf
+step_size: ${target.diff_sampler_clf.step_size}
+bwd_step_size: ${target.diff_sampler_clf.bwd_step_size}
+batch_size: ${target.all.batch_size}
+iters: ${target.all.iters}
+num_steps: ${target.diff_sampler_clf.num_steps}
+grad_clip: ${target.diff_sampler_clf.grad_clip}
+weight_decay: ${target.diff_sampler_clf.weight_decay}
+loss_type: "tb"
+init_logZ: ${target.diff_sampler_clf.init_logZ}
+logZ_step_size: ${target.diff_sampler_clf.logZ_step_size}
+logr_clip: ${target.diff_sampler_clf.logr_clip}
+huber_delta: ${target.diff_sampler_clf.huber_delta}
+reg_coef: ${target.diff_sampler_clf.reg_coef}
+eval_max_steps: ${target.diff_sampler_clf.num_steps}
+
+# Learning rate scheduler
+lr_schedule:
+  type: multistep  # multistep | cosine | constant
+  milestones: ${target.all.milestones}  # iteration indices at which to decay
+  gamma: 1.0  # multiply LR by gamma at each milestone
+
+defaults:
+  - model: pisgrad_net_clf
+
+buffer:
+  use: True
+  max_length_in_batches: 100
+  prioritize_by: "reward"  # none, reward, loss, uiw, piw
+  target_ess: 0.05
+  sampling_method: "systematic"  # multinomial, stratified, systematic, rank
+  rank_k: 0.01  # only used if sampling_method is rank
+  sample_with_replacement: True
+  prefill_steps: 100  # collect `prefill_steps` batches before starting training
+  bwd_to_fwd_ratio: 2  # number of bwd steps per fwd step
+  update_score: False
+
+local_search:
+  use: True
+  cycle: 25
+  gamma: 1e-3
+  num_steps: 300
