@@ -103,8 +103,8 @@ class NonAcyclicNet(nn.Module):
         fwd_mean = jnp.clip(fwd_mean, -self.outer_clip, self.outer_clip)
         fwd_clf_logits = fwd_clf_logits.squeeze(-1)
 
-        if force_stop:
-            fwd_clf_logits = jnp.full_like(fwd_clf_logits, 100.0)
+        # if force_stop:
+        #     fwd_clf_logits = jnp.full_like(fwd_clf_logits, 100.0)
 
         return fwd_clf_logits, fwd_mean, fwd_scale
 
@@ -128,8 +128,8 @@ class NonAcyclicNet(nn.Module):
         )
         bwd_clf_logits = bwd_clf_logits.squeeze(-1)
 
-        if force_stop:
-            bwd_clf_logits = jnp.full_like(bwd_clf_logits, 100.0)
+        # if force_stop:
+        #     bwd_clf_logits = jnp.full_like(bwd_clf_logits, 100.0)
 
         return bwd_clf_logits, bwd_mean, bwd_scale
 

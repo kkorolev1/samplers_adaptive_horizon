@@ -173,6 +173,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         target,
         target_xs,
         cfg,
+        plot_heatmaps=True,
     )
     eval_freq = max(alg_cfg.iters // cfg.n_evals, 1)
 
@@ -246,12 +247,15 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         # Off-policy training with buffer samples
         else:
             if local_search_cfg.use and off_policy_iters % local_search_cfg.cycle == 0:
-                # jax.debug.print(f"{it}, {off_policy_iters}")
+                key, key_gen = jax.random.split(key_gen)
+                samples, _, _ = buffer.sample(buffer_state, key, batch_size)
+
                 key, key_gen = jax.random.split(key_gen)
                 trajectories, _, log_rewards, _ = rnd_local_search_partial_base(
                     key,
                     model_state,
                     model_state.params,
+                    input_states=samples,
                 )
                 buffer_state = buffer.add(
                     buffer_state,

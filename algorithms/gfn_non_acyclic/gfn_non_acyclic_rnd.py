@@ -111,7 +111,7 @@ def per_sample_rnd_train(
         terminal_x = input_state
         aux = (terminal_x, key)
         aux, per_step_output = jax.lax.scan(
-            simulate_target_to_prior, aux, jnp.arange(num_steps)
+            simulate_target_to_prior, aux, jnp.arange(num_steps)[::-1]
         )
     trajectory, fwd_log_prob, bwd_log_prob, fwd_clf_logits, log_f = per_step_output
     return (
@@ -430,6 +430,8 @@ def per_sample_rnd_eval(
         is_terminal_next = is_terminal | jax.random.bernoulli(
             key, nn.sigmoid(fwd_clf_logits)
         )
+        if force_stop:
+            is_terminal_next = jnp.array(True)
         s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
         s_next = jax.lax.stop_gradient(s_next)
         fwd_log_prob = log_prob_kernel(s_next, fwd_mean, fwd_scale) + nn.log_sigmoid(
@@ -479,6 +481,8 @@ def per_sample_rnd_eval(
         is_terminal = is_terminal_next | jax.random.bernoulli(
             key, nn.sigmoid(bwd_clf_logits)
         )
+        if force_stop:
+            is_terminal = jnp.array(True)
         s, key_gen = sample_kernel(key_gen, bwd_mean, bwd_scale)
         s = jax.lax.stop_gradient(s)
         bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + nn.log_sigmoid(
@@ -706,9 +710,11 @@ def rnd_mcmc(
     prior_to_target: bool = True,
     terminal_xs: Array | None = None,
     log_rewards: Array | None = None,
+    input_states: Array | None = None,
 ):
-    key, key_gen = jax.random.split(key_gen)
-    input_states = initial_dist.sample(seed=key, sample_shape=(batch_size,))
+    if input_states is None:
+        key, key_gen = jax.random.split(key_gen)
+        input_states = initial_dist.sample(seed=key, sample_shape=(batch_size,))
 
     step_fn = get_step_fn(aux_tuple, target, step_name)
 

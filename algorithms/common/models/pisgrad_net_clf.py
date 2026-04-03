@@ -110,6 +110,7 @@ class PISGRADNetClf(nn.Module):
     use_lp: bool = True
     base_var: float = 1.0
     num_steps: int = 100
+    shared_model: bool = False
 
     fwd_scale_scalar: float = 4.0
     bwd_mean_scalar: float = 0.9
@@ -189,6 +190,17 @@ class PISGRADNetClf(nn.Module):
                     ),
                 ]
             )
+        # self.step_net = nn.Sequential(
+        #     [
+        #         nn.Dense(self.num_hid),
+        #         nn.gelu,
+        #         nn.Dense(
+        #             self.num_steps,
+        #             kernel_init=nn.initializers.constant(1e-8),
+        #             bias_init=nn.initializers.zeros_init(),
+        #         ),
+        #     ]
+        # )
 
     def get_fourier_features(self, timesteps):
         sin_embed_cond = jnp.sin(
@@ -269,7 +281,7 @@ class PISGRADNetClf(nn.Module):
         t,
         log_reward=None,
         lgv_term=None,
-        is_fwd=True,
+        predict_fwd=True,
         force_stop=False,
     ):
         time_array_emb = self.get_fourier_features(t)
@@ -278,7 +290,7 @@ class PISGRADNetClf(nn.Module):
         t_net1 = self.time_coder_state(time_array_emb)
         s_ext = jnp.concatenate((s, t_net1), axis=-1)
 
-        if is_fwd:
+        if predict_fwd:
             model_output = (
                 self.state_net(s_ext)
                 if self.shared_model

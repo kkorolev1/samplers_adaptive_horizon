@@ -6,6 +6,7 @@ from flax.traverse_util import path_aware_map
 
 from algorithms.common.models.pisgrad_net import PISGRADNet
 from algorithms.common.models.non_acyclic_net import NonAcyclicNet
+from algorithms.common.models.pisgrad_net_clf import PISGRADNetClf
 
 
 def pisgrad_net_label_map(path, _):
@@ -193,6 +194,105 @@ def init_model_non_acyclic(key, dim, alg_cfg) -> TrainState:
         params_bwd = model.init(
             key_gen,
             jnp.ones([alg_cfg.batch_size, dim]),
+            predict_fwd=False,
+        )
+        params["params"] = {**params["params"], **params_bwd["params"]}
+        
+    optimizers_map = {
+        "network_optim": optax.adam(
+            learning_rate=build_lr_schedule(alg_cfg.step_size)
+        )
+    }
+
+    if not model.shared_model:
+        optimizers_map["network_bwd_optim"] = optax.adam(
+            learning_rate=build_lr_schedule(alg_cfg.bwd_step_size)
+        )
+
+    params["params"]["logZ"] = jnp.array((alg_cfg.init_logZ,))
+    optimizers_map["logZ_optim"] = optax.adam(
+        learning_rate=build_lr_schedule(alg_cfg.logZ_step_size)
+    )
+
+    param_labels = path_aware_map(pisgrad_net_label_map, params)
+    partitioned_optimizer = optax.multi_transform(optimizers_map, param_labels)
+
+    mask_fn = lambda p: jax.tree.map(lambda x: x.ndim != 1, p)
+
+    optimizer = optax.chain(
+        optax.zero_nans(),
+        (
+            optax.clip_by_global_norm(alg_cfg.grad_clip)
+            if alg_cfg.grad_clip > 0
+            else optax.identity()
+        ),
+        (
+            optax.masked(optax.add_decayed_weights(alg_cfg.weight_decay), mask_fn)
+            if alg_cfg.weight_decay > 0
+            else optax.identity()
+        ),
+        partitioned_optimizer,
+    )
+
+    model_state = TrainState.create(apply_fn=model.apply, params=params, tx=optimizer)
+
+    return model_state
+
+
+def init_model_pisgrad_net_clf(key, dim, alg_cfg) -> TrainState:
+    def build_lr_schedule(base_lr):
+        sched_cfg = getattr(alg_cfg, "lr_schedule", None)
+        if sched_cfg is None:
+            return lambda step: base_lr
+
+        sched_type = getattr(sched_cfg, "type", "constant")
+        match sched_type:
+            case "constant":
+                return lambda step: base_lr
+            case "multistep":
+                milestones_arr = (
+                    jnp.array(sched_cfg.milestones, dtype=jnp.int32)
+                    if len(sched_cfg.milestones) > 0
+                    else None
+                )
+
+                def multistep_fn(step):
+                    if milestones_arr is None:
+                        num_decays = 0
+                    else:
+                        num_decays = jnp.sum(step >= milestones_arr)
+                    return base_lr * (sched_cfg.gamma**num_decays)
+
+                return multistep_fn
+            case "cosine":
+                decay_steps = max(alg_cfg.iters, 1)
+                return optax.cosine_decay_schedule(
+                    init_value=base_lr,
+                    decay_steps=decay_steps,
+                    alpha=sched_cfg.end_factor,
+                )
+            case _:
+                raise ValueError(f"Invalid learning rate scheduler type: {sched_type}")
+
+    # Define the model
+    model = PISGRADNetClf(**alg_cfg.model)
+
+    key, key_gen = jax.random.split(key)
+    # fmt: off
+    params = model.init(
+        key_gen,
+        jnp.ones([alg_cfg.batch_size, dim]),
+        jnp.ones([alg_cfg.batch_size, 1]),
+        jnp.ones([alg_cfg.batch_size,]),
+        jnp.ones([alg_cfg.batch_size, dim]),
+        predict_fwd=True,
+    )
+    if not model.shared_model:
+        key, key_gen = jax.random.split(key)
+        params_bwd = model.init(
+            key_gen,
+            jnp.ones([alg_cfg.batch_size, dim]),
+            jnp.ones([alg_cfg.batch_size, 1]),
             predict_fwd=False,
         )
         params["params"] = {**params["params"], **params_bwd["params"]}

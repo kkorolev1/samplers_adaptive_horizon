@@ -18,7 +18,7 @@ from utils.plot_utils import (
 )
 
 
-def get_eval_fn(rnd, target, target_xs, cfg):
+def get_eval_fn(rnd, target, target_xs, cfg, plot_heatmaps=False):
     rnd_reverse = jax.jit(partial(rnd, prior_to_target=True))
 
     if cfg.compute_forward_metrics and target.can_sample:
@@ -35,7 +35,6 @@ def get_eval_fn(rnd, target, target_xs, cfg):
         "logZ/reverse": [],
         "discrepancies/mmd": [],
         "discrepancies/sd": [],
-        "other/target_log_prob": [],
         "other/EMC": [],
         "stats/step": [],
         "stats/wallclock": [],
@@ -72,7 +71,6 @@ def get_eval_fn(rnd, target, target_xs, cfg):
         logger["max_traj_length/reverse"].append(jnp.max(trajectories_length))
         logger["logZ/reverse"].append(ln_z)
         logger["KL/elbo"].append(elbo)
-        logger["other/target_log_prob"].append(jnp.mean(target.log_prob(samples)))
 
         if cfg.compute_forward_metrics and target.can_sample:
             (
@@ -95,7 +93,7 @@ def get_eval_fn(rnd, target, target_xs, cfg):
             logger["max_traj_length/forward"].append(jnp.max(fwd_trajectories_length))
 
         logger.update(target.visualise(samples=samples))
-        if cfg.target.dim == 2:
+        if cfg.target.dim == 2 and plot_heatmaps:
             logger.update(
                 visualize_clf_heatmap(
                     model_state,
