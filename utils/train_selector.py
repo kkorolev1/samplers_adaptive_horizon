@@ -134,5 +134,17 @@ def get_train_fn(alg_name):
         )
 
         return gfn_non_acyclic_baseline
+    elif alg_name == "gfn_non_acyclic_ml":
+        from algorithms.gfn_non_acyclic_ml.gfn_non_acyclic_ml_trainer import (
+            gfn_non_acyclic_ml_trainer,
+        )
+
+        return gfn_non_acyclic_ml_trainer
+    elif alg_name == "diff_sampler_clf":
+        from algorithms.diff_sampler_clf.diff_sampler_clf_trainer import (
+            diff_sampler_clf_trainer,
+        )
+
+        return diff_sampler_clf_trainer
     else:
         raise ValueError(f"No algorithm named {alg_name}.")

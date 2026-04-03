@@ -11,7 +11,7 @@ import jax.numpy as jnp
 
 import wandb
 
-from algorithms.common.diffusion_related.init_model import init_model
+from algorithms.common.diffusion_related.init_model import init_model_non_acyclic
 from algorithms.common.eval_methods.stochastic_oc_methods import get_eval_fn
 from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import rnd_mcmc
 from eval.utils import extract_last_entry
@@ -34,7 +34,7 @@ def gfn_non_acyclic_baseline(cfg, target, exp=None):
 
     # Initialize the model
     key, key_gen = jax.random.split(key_gen)
-    model_state = init_model(key, dim, alg_cfg)
+    model_state = init_model_non_acyclic(key, dim, alg_cfg)
 
     rnd_eval_partial_base = partial(
         rnd_mcmc,
@@ -53,20 +53,6 @@ def gfn_non_acyclic_baseline(cfg, target, exp=None):
         cfg,
     )
     eval_freq = max(alg_cfg.iters // cfg.n_evals, 1)
-
-    #         logZ_estimates.append(jax.nn.logsumexp(log_pbs_over_pfs + log_rewards))
-    #     logZ_init = jax.nn.logsumexp(jnp.stack(logZ_estimates)) - jnp.log(
-    #         buffer_cfg.prefill_steps * batch_size
-    #     )
-    # else:
-    #     key, key_gen = jax.random.split(key_gen)
-    #     _, (_, log_pbs_over_pfs, log_rewards, _) = loss_fwd_nograd_fn(
-    #         key, model_state, model_state.params
-    #     )
-    #     logZ_init = jax.nn.logsumexp(log_pbs_over_pfs + log_rewards) - jnp.log(batch_size)
-
-    # model_state.params["params"]["logZ"] = jnp.atleast_1d(logZ_init)
-    # print(f"logZ_init: {logZ_init:.4f}")
 
     ### Training phase
     for it in range(alg_cfg.iters):

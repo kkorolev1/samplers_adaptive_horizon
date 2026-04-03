@@ -25,15 +25,7 @@ lr_schedule:
   gamma: 1.0  # multiply LR by gamma at each milestone
 
 defaults:
-  - model: pisgrad_net
-
-model:
-  num_hid: ${target.all.num_hid}
-  weight_init: 1e-8  # Initialization of the last layers' weights of the time-dependent network
-  bias_init: 0.1  # Initialization of the last layers' bias of the time-dependent network
-  gamma: ${target.gfn_non_acyclic.gamma}
-  learn_fwd_corrections: True
-  shared_model: False
+  - model: non_acyclic_net
 
 buffer:
   use: True

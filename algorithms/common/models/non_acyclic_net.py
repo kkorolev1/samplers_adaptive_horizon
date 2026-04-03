@@ -5,7 +5,7 @@ from flax import linen as nn
 class NonAcyclicNet(nn.Module):
     dim: int
 
-    num_layers: int = 2
+    num_layers: int = 3
     num_hid: int = 64
     outer_clip: float = 1e4
     inner_clip: float = 1e2
@@ -16,7 +16,7 @@ class NonAcyclicNet(nn.Module):
     gamma: float = 1.0
     fwd_log_var_range: float = 4.0
     bwd_log_var_range: float = 4.0
-    learn_fwd_corrections: bool = False
+    learn_fwd_corrections: bool = True
     shared_model: bool = False
 
     def setup(self):
@@ -40,7 +40,7 @@ class NonAcyclicNet(nn.Module):
             self.backbone = nn.Sequential(
                 [
                     nn.Sequential([nn.Dense(self.num_hid), nn.gelu])
-                    for _ in range(self.num_layers)
+                    for _ in range(self.num_layers - 1)
                 ]
             )
 
@@ -121,8 +121,8 @@ class NonAcyclicNet(nn.Module):
             [1, 1 + self.dim],
             axis=-1,
         )
-        bwd_mean = s - nn.softplus(bwd_mean_corr) * s * self.gamma
-        bwd_mean = jnp.clip(bwd_mean, -self.outer_clip, self.outer_clip)
+        # fmt: off
+        bwd_mean = s - jnp.clip(nn.softplus(bwd_mean_corr) * s, -self.outer_clip, self.outer_clip) * self.gamma
         bwd_scale = jnp.sqrt(
             jnp.exp(self.bwd_log_var_range * nn.tanh(bwd_scale_corr)) * self.gamma
         )
@@ -138,8 +138,7 @@ class NonAcyclicNet(nn.Module):
         s,
         log_reward=None,
         lgv_term=None,
-        predict_fwd=False,
-        predict_bwd=False,
+        predict_fwd=True,
         force_stop=False,
     ):
         if predict_fwd:
@@ -159,7 +158,7 @@ class NonAcyclicNet(nn.Module):
             else:
                 log_flow = log_reward - nn.log_sigmoid(fwd_clf_logits)
             return fwd_clf_logits, fwd_mean, fwd_scale, log_flow
-        if predict_bwd:
+        else:
             model_output = (
                 self.state_net(s)
                 if self.shared_model

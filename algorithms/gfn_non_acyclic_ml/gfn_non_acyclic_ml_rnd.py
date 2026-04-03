@@ -10,6 +10,7 @@ from flax.training.train_state import TrainState
 import equinox
 
 from algorithms.common.types import Array, RandomKey, ModelParams
+from algorithms.gfn_non_acyclic.sampling_utils import binary_search_smoothing
 
 
 def sample_kernel(key_gen, mean, scale):
@@ -43,23 +44,25 @@ def per_sample_rnd_train(
 ):
     (logr_clip,) = aux_tuple
 
-    def model_forward(s, log_reward, langevin):
-        return model_state.apply_fn(params, s, log_reward, langevin, predict_fwd=True)
+    def model_forward(s, l, log_reward, langevin):
+        return model_state.apply_fn(
+            params, s, l, log_reward, langevin, predict_fwd=True
+        )
 
-    def model_backward(s_next):
-        return model_state.apply_fn(params, s_next, predict_fwd=False)
+    def model_backward(s_next, l_next):
+        return model_state.apply_fn(params, s_next, l_next, predict_fwd=False)
 
     def compute_log_reward_and_langevin(s):
         return jax.lax.stop_gradient(jax.value_and_grad(target.log_prob)(s))
 
     def simulate_prior_to_target(state, per_step_input):
-        s, key_gen = state
+        s, l, key_gen = state
         s = jax.lax.stop_gradient(s)
 
         log_reward, langevin = compute_log_reward_and_langevin(s)
         log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
         fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
-            s, log_reward, langevin
+            s, l, log_reward, langevin
         )
         s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
         s_next = jax.lax.stop_gradient(s_next)
@@ -278,7 +281,6 @@ def loss_fn_prefix_tb(
         jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),
         log_rewards,
         jax.lax.stop_gradient(tb_losses),
-        weights,
     )
 
 
@@ -703,7 +705,6 @@ def rnd_mcmc(
     num_steps,
     step_name,
     initial_dist: distrax.Distribution | None = None,
-    prior_to_target: bool = True,
     terminal_xs: Array | None = None,
     log_rewards: Array | None = None,
 ):
@@ -746,7 +747,7 @@ if __name__ == "__main__":
             s,
             log_reward=None,
             lgv_term=None,
-            predict_fwd=False,
+            predict_fwd=True,
         ):
             # Emulate logic in non_acyclic_net.py's __call__
             # Only basic logic/hardcoded but preserves output structure
@@ -788,7 +789,7 @@ if __name__ == "__main__":
     # Use the dummy train state instead of the real one
     model_state = DummyTrainState()
     params = model_state.params
-    rnd_partial = rnd_eval(
+    rnd_partial = rnd_with_term(
         key,
         model_state,
         params,

@@ -26,7 +26,7 @@ from eval.utils import extract_last_entry
 from utils.print_utils import print_results
 
 
-def gfn_non_acyclic_trainer(cfg, target, exp=None):
+def diff_sampler_clf_trainer(cfg, target, exp=None):
     key_gen = jax.random.PRNGKey(cfg.seed)
 
     dim = target.dim
