@@ -189,19 +189,6 @@ def gfn_non_acyclic_ml_trainer(cfg, target, exp=None):
                 log_rewards,
                 losses,
             )
-    #         logZ_estimates.append(jax.nn.logsumexp(log_pbs_over_pfs + log_rewards))
-    #     logZ_init = jax.nn.logsumexp(jnp.stack(logZ_estimates)) - jnp.log(
-    #         buffer_cfg.prefill_steps * batch_size
-    #     )
-    # else:
-    #     key, key_gen = jax.random.split(key_gen)
-    #     _, (_, log_pbs_over_pfs, log_rewards, _) = loss_fwd_nograd_fn(
-    #         key, model_state, model_state.params
-    #     )
-    #     logZ_init = jax.nn.logsumexp(log_pbs_over_pfs + log_rewards) - jnp.log(batch_size)
-
-    # model_state.params["params"]["logZ"] = jnp.atleast_1d(logZ_init)
-    # print(f"logZ_init: {logZ_init:.4f}")
 
     def tree_l2_norm(tree):
         leaves = jax.tree_util.tree_leaves(tree)
@@ -235,19 +222,18 @@ def gfn_non_acyclic_ml_trainer(cfg, target, exp=None):
                     losses,
                 )
 
-            # from jax.scipy.special import logsumexp
-            # logZ_est = logsumexp(log_pbs_over_pfs + log_rewards) - jnp.log(batch_size)
-            # jax.debug.print("logZ_est: {logZ_est}", logZ_est=logZ_est)
-
         # Off-policy training with buffer samples
         else:
             if local_search_cfg.use and off_policy_iters % local_search_cfg.cycle == 0:
-                # jax.debug.print(f"{it}, {off_policy_iters}")
+                key, key_gen = jax.random.split(key_gen)
+                samples, _, _ = buffer.sample(buffer_state, key, batch_size)
+
                 key, key_gen = jax.random.split(key_gen)
                 trajectories, _, log_rewards, _ = rnd_local_search_partial_base(
                     key,
                     model_state,
                     model_state.params,
+                    input_states=samples,
                 )
                 buffer_state = buffer.add(
                     buffer_state,

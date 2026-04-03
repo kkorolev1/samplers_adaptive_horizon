@@ -706,10 +706,11 @@ def rnd_mcmc(
     step_name,
     initial_dist: distrax.Distribution | None = None,
     terminal_xs: Array | None = None,
-    log_rewards: Array | None = None,
+    input_states: Array | None = None,
 ):
-    key, key_gen = jax.random.split(key_gen)
-    input_states = initial_dist.sample(seed=key, sample_shape=(batch_size,))
+    if input_states is None:
+        key, key_gen = jax.random.split(key_gen)
+        input_states = initial_dist.sample(seed=key, sample_shape=(batch_size,))
 
     step_fn = get_step_fn(aux_tuple, target, step_name)
 
