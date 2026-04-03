@@ -11,15 +11,13 @@ import jax.numpy as jnp
 
 import wandb
 
-from algorithms.common.diffusion_related.init_model import init_model_non_acyclic
+from algorithms.common.diffusion_related.init_model import init_model_pisgrad_net_clf
 from algorithms.common.eval_methods.stochastic_oc_methods import get_eval_fn
-from algorithms.gfn_non_acyclic.buffer import build_terminal_state_buffer
-from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import (
+from algorithms.diff_sampler_clf.buffer import build_terminal_state_buffer
+from algorithms.diff_sampler_clf.diff_sampler_clf_rnd import (
     rnd_train,
     rnd_mcmc,
     rnd_eval,
-    loss_fn_db,
-    loss_fn_subtb,
     loss_fn_prefix_tb,
 )
 from eval.utils import extract_last_entry
@@ -48,13 +46,7 @@ def diff_sampler_clf_trainer(cfg, target, exp=None):
     target_sds = jnp.array(target_sds)
     print(f"target SD mean={jnp.mean(target_sds):.3f} std={jnp.std(target_sds):.3f}")
 
-    initial_dist = distrax.MultivariateNormalDiag(
-        jnp.zeros(dim), jnp.ones(dim) * alg_cfg.init_std
-    )
-    # alg_cfg.init_std = jnp.sqrt(0.1)
-    # initial_dist = distrax.MultivariateNormalDiag(
-    #     jnp.ones(dim), jnp.ones(dim) * alg_cfg.init_std
-    # )
+    initial_dist = None
     aux_tuple = (alg_cfg.logr_clip,)
 
     # Initialize the buffer
@@ -73,7 +65,7 @@ def diff_sampler_clf_trainer(cfg, target, exp=None):
 
     # Initialize the model
     key, key_gen = jax.random.split(key_gen)
-    model_state = init_model_non_acyclic(key, dim, alg_cfg)
+    model_state = init_model_pisgrad_net_clf(key, dim, alg_cfg)
 
     # Print number of parameters in the model
     def count_params(params):
@@ -112,28 +104,11 @@ def diff_sampler_clf_trainer(cfg, target, exp=None):
         num_steps=alg_cfg.eval_max_steps,
         initial_dist=initial_dist,
     )
-    if alg_cfg.loss_type == "db":
-        loss_fn_base = partial(
-            loss_fn_db,
-            huber_delta=alg_cfg.huber_delta,
-            reg_coef=reg_coef,
-        )
-    elif alg_cfg.loss_type == "subtb":
-        loss_fn_base = partial(
-            loss_fn_subtb,
-            huber_delta=alg_cfg.huber_delta,
-            n_chunks=alg_cfg.n_chunks,
-            reg_coef=reg_coef,
-        )
-    elif alg_cfg.loss_type == "tb":
-        loss_fn_base = partial(
-            loss_fn_prefix_tb,
-            huber_delta=alg_cfg.huber_delta,
-            reg_coef=reg_coef,
-            use_weights=alg_cfg.use_weights,
-        )
-    else:
-        raise ValueError(f"Unknown loss type {alg_cfg.loss_type}")
+    loss_fn_base = partial(
+        loss_fn_prefix_tb,
+        huber_delta=alg_cfg.huber_delta,
+        reg_coef=reg_coef,
+    )
 
     # Define the function to be JIT-ed for FWD pass
     @partial(jax.jit)
@@ -193,19 +168,6 @@ def diff_sampler_clf_trainer(cfg, target, exp=None):
                 log_rewards,
                 losses,
             )
-    #         logZ_estimates.append(jax.nn.logsumexp(log_pbs_over_pfs + log_rewards))
-    #     logZ_init = jax.nn.logsumexp(jnp.stack(logZ_estimates)) - jnp.log(
-    #         buffer_cfg.prefill_steps * batch_size
-    #     )
-    # else:
-    #     key, key_gen = jax.random.split(key_gen)
-    #     _, (_, log_pbs_over_pfs, log_rewards, _) = loss_fwd_nograd_fn(
-    #         key, model_state, model_state.params
-    #     )
-    #     logZ_init = jax.nn.logsumexp(log_pbs_over_pfs + log_rewards) - jnp.log(batch_size)
-
-    # model_state.params["params"]["logZ"] = jnp.atleast_1d(logZ_init)
-    # print(f"logZ_init: {logZ_init:.4f}")
 
     def tree_l2_norm(tree):
         leaves = jax.tree_util.tree_leaves(tree)
@@ -239,19 +201,18 @@ def diff_sampler_clf_trainer(cfg, target, exp=None):
                     losses,
                 )
 
-            # from jax.scipy.special import logsumexp
-            # logZ_est = logsumexp(log_pbs_over_pfs + log_rewards) - jnp.log(batch_size)
-            # jax.debug.print("logZ_est: {logZ_est}", logZ_est=logZ_est)
-
         # Off-policy training with buffer samples
         else:
             if local_search_cfg.use and off_policy_iters % local_search_cfg.cycle == 0:
-                # jax.debug.print(f"{it}, {off_policy_iters}")
+                key, key_gen = jax.random.split(key_gen)
+                samples, _, _ = buffer.sample(buffer_state, key, batch_size)
+
                 key, key_gen = jax.random.split(key_gen)
                 trajectories, _, log_rewards, _ = rnd_local_search_partial_base(
                     key,
                     model_state,
                     model_state.params,
+                    input_states=samples,
                 )
                 buffer_state = buffer.add(
                     buffer_state,
