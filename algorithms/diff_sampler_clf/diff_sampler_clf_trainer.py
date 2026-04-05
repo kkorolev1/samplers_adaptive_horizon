@@ -85,6 +85,7 @@ def diff_sampler_clf_trainer(cfg, target, exp=None):
         aux_tuple=aux_tuple,
         target=target,
         num_steps=num_steps,
+        use_lp=alg_cfg.model.use_lp,
         initial_dist=initial_dist,
     )
     local_search_cfg = alg_cfg.local_search
@@ -102,6 +103,7 @@ def diff_sampler_clf_trainer(cfg, target, exp=None):
         aux_tuple=aux_tuple,
         target=target,
         num_steps=alg_cfg.eval_max_steps,
+        use_lp=alg_cfg.model.use_lp,
         initial_dist=initial_dist,
     )
     loss_fn_base = partial(

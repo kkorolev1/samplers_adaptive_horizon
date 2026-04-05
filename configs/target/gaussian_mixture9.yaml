@@ -51,5 +51,5 @@ all: # Parameters that are shared between all algorithms
   iters: 30000
   milestones: [10000, 20000]
   num_steps: 64
-  use_lp: False
-  num_hid: 256
+  use_lp: True
+  num_hid: 64

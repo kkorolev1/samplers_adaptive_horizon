@@ -9,6 +9,7 @@ class NonAcyclicNet(nn.Module):
     num_hid: int = 64
     outer_clip: float = 1e4
     inner_clip: float = 1e2
+    use_lp: bool = True
 
     weight_init: float = 1e-8
     bias_init: float = 0.1
@@ -20,7 +21,11 @@ class NonAcyclicNet(nn.Module):
     shared_model: bool = False
 
     def setup(self):
-        self.fwd_pred_dim = 1 + 3 * self.dim if self.learn_fwd_corrections else 1
+        self.fwd_pred_dim = (
+            1 + 2 * self.dim + (self.dim if self.use_lp else 0)
+            if self.learn_fwd_corrections
+            else 1
+        )
         self.bwd_pred_dim = 1 + 2 * self.dim
         if self.shared_model:
             self.state_net = nn.Sequential(
@@ -80,18 +85,31 @@ class NonAcyclicNet(nn.Module):
         if self.shared_model:
             model_output, _ = jnp.split(model_output, [self.fwd_pred_dim], axis=-1)
         if self.learn_fwd_corrections:
-            (
-                fwd_clf_logits,
-                fwd_mean_corr,
-                fwd_lgv_scale,
-                fwd_scale_corr,
-            ) = jnp.split(
-                model_output,
-                [1, 1 + self.dim, 1 + 2 * self.dim],
-                axis=-1,
-            )
+            if self.use_lp:
+                (
+                    fwd_clf_logits,
+                    fwd_drift,
+                    fwd_lgv_scale,
+                    fwd_scale_corr,
+                ) = jnp.split(
+                    model_output,
+                    [1, 1 + self.dim, 1 + 2 * self.dim],
+                    axis=-1,
+                )
+                fwd_drift = fwd_drift + (1 + fwd_lgv_scale) * lgv_term
+            else:
+                (
+                    fwd_clf_logits,
+                    fwd_drift,
+                    fwd_scale_corr,
+                ) = jnp.split(
+                    model_output,
+                    [1, 1 + self.dim],
+                    axis=-1,
+                )
             # fmt: off
-            fwd_mean = s + jnp.clip(fwd_mean_corr + (1 + fwd_lgv_scale) * lgv_term, -self.outer_clip, self.outer_clip) * self.gamma
+            fwd_drift = jnp.clip(fwd_drift, -self.outer_clip, self.outer_clip)
+            fwd_mean = s + fwd_drift * self.gamma
             fwd_scale = jnp.sqrt(
                 2 * jnp.exp(self.fwd_log_var_range * nn.tanh(fwd_scale_corr)) * self.gamma
             )
@@ -122,10 +140,12 @@ class NonAcyclicNet(nn.Module):
             axis=-1,
         )
         # fmt: off
-        bwd_mean = s - jnp.clip(nn.softplus(bwd_mean_corr) * s, -self.outer_clip, self.outer_clip) * self.gamma
+        bwd_drift = jnp.clip(-nn.softplus(bwd_mean_corr) * s, -self.outer_clip, self.outer_clip)
+        bwd_mean = s + bwd_drift * self.gamma
         bwd_scale = jnp.sqrt(
             jnp.exp(self.bwd_log_var_range * nn.tanh(bwd_scale_corr)) * self.gamma
         )
+        bwd_mean = jnp.clip(bwd_mean, -self.outer_clip, self.outer_clip)
         bwd_clf_logits = bwd_clf_logits.squeeze(-1)
 
         # if force_stop:

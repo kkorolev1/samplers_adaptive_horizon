@@ -39,6 +39,7 @@ def per_sample_rnd_train(
     aux_tuple,
     target,
     num_steps,
+    use_lp,
     prior_to_target=True,
 ):
     (logr_clip,) = aux_tuple
@@ -50,7 +51,9 @@ def per_sample_rnd_train(
         return model_state.apply_fn(params, s_next, predict_fwd=False)
 
     def compute_log_reward_and_langevin(s):
-        return jax.lax.stop_gradient(jax.value_and_grad(target.log_prob)(s))
+        if use_lp:
+            return jax.lax.stop_gradient(jax.value_and_grad(target.log_prob)(s))
+        return jax.lax.stop_gradient(target.log_prob(s)), None
 
     def simulate_prior_to_target(state, per_step_input):
         s, key_gen = state
@@ -132,6 +135,7 @@ def rnd_train(
     aux_tuple,
     target,
     num_steps,
+    use_lp,
     prior_to_target=True,
     initial_dist: distrax.Distribution | None = None,
     terminal_xs: Array | None = None,
@@ -153,7 +157,7 @@ def rnd_train(
         log_fs,
     ) = jax.vmap(
         per_sample_rnd_train,
-        in_axes=(0, None, None, 0, None, None, None, None),
+        in_axes=(0, None, None, 0, None, None, None, None, None),
     )(
         keys,
         model_state,
@@ -162,6 +166,7 @@ def rnd_train(
         aux_tuple,
         target,
         num_steps - 1,
+        use_lp,
         prior_to_target,
     )
     if not prior_to_target:
@@ -382,6 +387,7 @@ def per_sample_rnd_eval(
     aux_tuple,
     target,
     num_steps,
+    use_lp,
     initial_dist,
     prior_to_target=True,
 ):
@@ -406,7 +412,9 @@ def per_sample_rnd_eval(
         )
 
     def compute_log_reward_and_langevin(s):
-        return jax.lax.stop_gradient(jax.value_and_grad(target.log_prob)(s))
+        if use_lp:
+            return jax.lax.stop_gradient(jax.value_and_grad(target.log_prob)(s))
+        return jax.lax.stop_gradient(target.log_prob(s)), None
 
     def cond_fun(carry):
         state, _ = carry
@@ -565,6 +573,7 @@ def rnd_eval(
     aux_tuple,
     target,
     num_steps,
+    use_lp,
     prior_to_target=True,
     initial_dist: distrax.Distribution | None = None,
     terminal_xs: Array | None = None,
@@ -579,7 +588,7 @@ def rnd_eval(
     keys = jax.random.split(key_gen, num=batch_size)
     trajectories, terminals_mask, fwd_log_probs, bwd_log_probs = jax.vmap(
         per_sample_rnd_eval,
-        in_axes=(0, None, None, 0, None, None, None, None, None),
+        in_axes=(0, None, None, 0, None, None, None, None, None, None),
     )(
         keys,
         model_state,
@@ -588,6 +597,7 @@ def rnd_eval(
         aux_tuple,
         target,
         num_steps - 1,
+        use_lp,
         initial_dist,
         prior_to_target,
     )

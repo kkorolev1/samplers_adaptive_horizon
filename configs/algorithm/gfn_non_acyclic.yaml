@@ -27,6 +27,10 @@ lr_schedule:
 defaults:
   - model: non_acyclic_net
 
+model:
+  use_lp: ${target.all.use_lp}
+  num_hid: ${target.all.num_hid}
+
 buffer:
   use: True
   max_length_in_batches: 100

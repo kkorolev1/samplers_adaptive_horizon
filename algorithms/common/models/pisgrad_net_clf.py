@@ -246,8 +246,6 @@ class PISGRADNetClf(nn.Module):
         fwd_scale = jnp.sqrt(
             jnp.exp(self.fwd_scale_scalar * nn.tanh(fwd_scale_corr)) * self.base_var * dt
         )
-
-        fwd_mean = jnp.clip(fwd_mean, -self.outer_clip, self.outer_clip)
         fwd_clf_logits = fwd_clf_logits.squeeze(-1)
 
         if force_stop:
