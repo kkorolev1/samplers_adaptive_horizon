@@ -40,9 +40,12 @@ def per_sample_rnd_train(
     aux_tuple,
     target,
     num_steps,
+    num_levels,
+    use_lp,
     prior_to_target=True,
 ):
-    (logr_clip,) = aux_tuple
+    (logr_clip, compute_level_log_reward) = aux_tuple
+    steps_per_level = max(num_steps // num_levels, 1)
 
     def model_forward(s, l, log_reward, langevin):
         return model_state.apply_fn(
@@ -52,27 +55,46 @@ def per_sample_rnd_train(
     def model_backward(s_next, l_next):
         return model_state.apply_fn(params, s_next, l_next, predict_fwd=False)
 
-    def compute_log_reward_and_langevin(s):
-        return jax.lax.stop_gradient(jax.value_and_grad(target.log_prob)(s))
+    def compute_log_reward_and_langevin(s, l):
+        if use_lp:
+            return jax.lax.stop_gradient(
+                jax.value_and_grad(compute_level_log_reward)(s, l)
+            )
+        return jax.lax.stop_gradient(compute_level_log_reward(s, l)), None
 
-    def simulate_prior_to_target(state, per_step_input):
-        s, l, key_gen = state
+    def get_level(step):
+        level_step = step // steps_per_level
+        return jnp.minimum(level_step + 1, num_levels)
+
+    def get_next_level(step):
+        return get_level(step + (1 if prior_to_target else -1))
+
+    def simulate_prior_to_target(state, step):
+        s, key_gen = state
+        l = get_level(step)
+        l_next = get_next_level(step)
         s = jax.lax.stop_gradient(s)
-
-        log_reward, langevin = compute_log_reward_and_langevin(s)
+        # jax.debug.print(
+        #     "fwd step {} level {} next_level {}",
+        #     step,
+        #     get_level(step),
+        #     get_next_level(step),
+        # )
+        log_reward, langevin = compute_log_reward_and_langevin(s, l)
         log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
         fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
             s, l, log_reward, langevin
         )
         s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
         s_next = jax.lax.stop_gradient(s_next)
-        fwd_log_prob = log_prob_kernel(s_next, fwd_mean, fwd_scale) + nn.log_sigmoid(
-            -fwd_clf_logits
+        fwd_log_prob = log_prob_kernel(s_next, fwd_mean, fwd_scale) + jnp.where(
+            l == l_next,
+            nn.log_sigmoid(-fwd_clf_logits),
+            compute_level_log_reward(s_next, l),
         )
-
-        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next)
-        bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jax.nn.log_sigmoid(
-            -bwd_clf_logits
+        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next, l_next)
+        bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jnp.where(
+            l == l_next, nn.log_sigmoid(-bwd_clf_logits), nn.log_sigmoid(bwd_clf_logits)
         )
 
         # Return next state and per-step output
@@ -80,24 +102,33 @@ def per_sample_rnd_train(
         per_step_output = (s, fwd_log_prob, bwd_log_prob, fwd_clf_logits, log_f)
         return next_state, per_step_output
 
-    def simulate_target_to_prior(state, per_step_input):
+    def simulate_target_to_prior(state, step):
         s_next, key_gen = state
+        l_next = get_level(step)
+        l = get_next_level(step)
+        # jax.debug.print(
+        #     "bwd step {} level {} next_level {}",
+        #     step,
+        #     get_level(step),
+        #     get_next_level(step),
+        # )
         s_next = jax.lax.stop_gradient(s_next)
-        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next)
+        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next, l_next)
         s, key_gen = sample_kernel(key_gen, bwd_mean, bwd_scale)
         s = jax.lax.stop_gradient(s)
-        bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jax.nn.log_sigmoid(
-            -bwd_clf_logits
+        bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jnp.where(
+            l == l_next, nn.log_sigmoid(-bwd_clf_logits), nn.log_sigmoid(bwd_clf_logits)
         )
-
-        log_reward, langevin = compute_log_reward_and_langevin(s)
+        log_reward, langevin = compute_log_reward_and_langevin(s, l)
         log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
         fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
-            s, log_reward, langevin
+            s, l, log_reward, langevin
         )
-        fwd_log_prob = log_prob_kernel(
-            s_next, fwd_mean, fwd_scale
-        ) + jax.nn.log_sigmoid(-fwd_clf_logits)
+        fwd_log_prob = log_prob_kernel(s_next, fwd_mean, fwd_scale) + jnp.where(
+            l == l_next,
+            nn.log_sigmoid(-fwd_clf_logits),
+            compute_level_log_reward(s_next, l),
+        )
 
         next_state = (s, key_gen)
         per_step_output = (s, fwd_log_prob, bwd_log_prob, fwd_clf_logits, log_f)
@@ -107,14 +138,14 @@ def per_sample_rnd_train(
         init_x = input_state
         aux = (init_x, key)
         aux, per_step_output = jax.lax.scan(
-            simulate_prior_to_target, aux, jnp.arange(num_steps)
+            simulate_prior_to_target, aux, jnp.arange(0, num_steps - 1)
         )
         terminal_x, _ = aux
     else:
         terminal_x = input_state
         aux = (terminal_x, key)
         aux, per_step_output = jax.lax.scan(
-            simulate_target_to_prior, aux, jnp.arange(num_steps)
+            simulate_target_to_prior, aux, jnp.arange(1, num_steps)[::-1]
         )
     trajectory, fwd_log_prob, bwd_log_prob, fwd_clf_logits, log_f = per_step_output
     return (
@@ -135,6 +166,8 @@ def rnd_train(
     aux_tuple,
     target,
     num_steps,
+    num_levels,
+    use_lp,
     prior_to_target=True,
     initial_dist: distrax.Distribution | None = None,
     terminal_xs: Array | None = None,
@@ -156,7 +189,7 @@ def rnd_train(
         log_fs,
     ) = jax.vmap(
         per_sample_rnd_train,
-        in_axes=(0, None, None, 0, None, None, None, None),
+        in_axes=(0, None, None, 0, None, None, None, None, None, None),
     )(
         keys,
         model_state,
@@ -164,7 +197,9 @@ def rnd_train(
         input_states,
         aux_tuple,
         target,
-        num_steps - 1,
+        num_steps,
+        num_levels,
+        use_lp,
         prior_to_target,
     )
     if not prior_to_target:
@@ -186,26 +221,31 @@ def rnd_train(
 
     # We need to calculate log flow and fwd clf logits for the last continuous xs
     terminal_xs = jax.lax.stop_gradient(terminal_xs)
+    terminal_levels = jnp.full((batch_size, 1), num_levels)
     terminal_fwd_clf_logits, _, _, terminal_log_fs = model_state.apply_fn(
-        params, terminal_xs, log_rewards, predict_fwd=True
+        params,
+        terminal_xs,
+        terminal_levels,
+        log_rewards,
+        None,
+        predict_fwd=True,
     )
     fwd_clf_logits = jnp.concatenate(
         [fwd_clf_logits, terminal_fwd_clf_logits[:, None]], axis=1
     )
-    logZ = params["params"]["logZ"]
     log_fs = jnp.concatenate(
         [
-            jnp.zeros_like(terminal_log_fs)[:, None],  # set to logZ later
             log_fs,
             terminal_log_fs[:, None],
         ],
         axis=1,
     )
-    log_fs = log_fs.at[:, 0].set(logZ)
-
     # We need to calculate forward and backward log probs for the first continuous xs
     init_xs = jax.lax.stop_gradient(trajectories[:, 0])
-    bwd_clf_logits, *_ = model_state.apply_fn(params, init_xs, predict_fwd=False)
+    init_levels = jnp.ones((batch_size, 1), dtype=int)
+    bwd_clf_logits, *_ = model_state.apply_fn(
+        params, init_xs, init_levels, predict_fwd=False
+    )
 
     fwd_log_probs = jnp.concatenate(
         [init_fwd_log_probs[:, None], fwd_log_probs], axis=1
@@ -230,6 +270,8 @@ def loss_fn_prefix_tb(
     model_state: TrainState,
     params: ModelParams,
     rnd_partial: Callable[[RandomKey, TrainState, ModelParams], tuple[Array, ...]],
+    num_levels: int,
+    compute_level_log_reward: Callable[Array, Array],
     reg_coef: float = 0.0,
     huber_delta: float | None = None,
     use_weights: bool = True,
@@ -237,32 +279,64 @@ def loss_fn_prefix_tb(
     (trajectories, log_rewards, log_pfs_over_pbs, fwd_clf_logits, log_fs) = rnd_partial(
         key, model_state, params
     )
+    batch_size = log_fs.shape[0]
+    num_steps = log_fs.shape[1]
+    steps_per_level = num_steps // num_levels
 
-    fwd_clf_log_probs = jax.nn.log_sigmoid(fwd_clf_logits)
-    logZ = params["params"]["logZ"]
-    discrepancy = logZ + jnp.cumsum(log_pfs_over_pbs, axis=1) - log_fs[:, 1:]
+    log_pfs_over_pbs_levels = log_pfs_over_pbs.reshape(
+        batch_size, num_levels, steps_per_level
+    )
+
+    log_pfs_over_pbs_cumsum_levels = jnp.cumsum(log_pfs_over_pbs_levels, axis=2)
+
+    # L constants
+    logZ_levels = params["params"]["logZ"]
+    logZ_levels = jnp.concatenate(
+        [jnp.zeros([1], dtype=logZ_levels.dtype), logZ_levels], axis=0
+    )[None, :, None]
+
+    log_fs_levels = log_fs.reshape(batch_size, num_levels, steps_per_level)
+
+    discrepancy = (
+        log_pfs_over_pbs_cumsum_levels
+        - logZ_levels[:, :-1]
+        - log_fs_levels
+        + logZ_levels[:, 1:]
+    )
+
+    fwd_clf_logits_levels = fwd_clf_logits.reshape(
+        batch_size, num_levels, steps_per_level
+    )
 
     if use_weights:
-        log_weights = (
-            jnp.cumsum(
-                jnp.concatenate(
-                    [
-                        jnp.zeros((fwd_clf_logits.shape[0], 1)),
-                        jax.nn.log_sigmoid(-fwd_clf_logits)[:, :-1],
-                    ],
-                    axis=1,
-                ),
-                axis=1,
-            )
-            + fwd_clf_log_probs
-        )
+        log_weights = jnp.cumsum(
+            jnp.concatenate(
+                [
+                    jnp.zeros(
+                        (
+                            fwd_clf_logits_levels.shape[0],
+                            fwd_clf_logits_levels.shape[1],
+                            1,
+                        )
+                    ),
+                    jax.nn.log_sigmoid(-fwd_clf_logits_levels)[:, :, :-1],
+                ],
+                axis=2,
+            ),
+            axis=2,
+        ) + jax.nn.log_sigmoid(fwd_clf_logits_levels)
         log_weights = jax.lax.stop_gradient(log_weights)
         weights = jnp.exp(
             log_weights
-            - jax.scipy.special.logsumexp(log_weights, axis=1, keepdims=True)
+            - jax.scipy.special.logsumexp(log_weights, axis=2, keepdims=True)
         )
     else:
-        weights = jnp.ones((fwd_clf_logits.shape[0], 1)) / fwd_clf_logits.shape[1]
+        weights = (
+            jnp.ones(
+                (fwd_clf_logits_levels.shape[0], fwd_clf_logits_levels.shape[1], 1)
+            )
+            / fwd_clf_logits_levels.shape[-1]
+        )
 
     if huber_delta is not None:
         tb_losses = jnp.where(
@@ -273,106 +347,14 @@ def loss_fn_prefix_tb(
     else:
         tb_losses = jnp.square(discrepancy)
 
-    tb_losses = tb_losses * weights
-    losses = tb_losses.sum(-1) + reg_coef * (jnp.exp(log_fs[:, 1:]) * weights).sum(-1)
+    tb_losses = (tb_losses * weights).sum(-1).mean(-1)
+    losses = tb_losses + reg_coef * (jnp.exp(log_fs_levels) * weights).sum(-1).mean(-1)
 
     return jnp.mean(losses), (
         trajectories[:, -1],
         jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),
         log_rewards,
         jax.lax.stop_gradient(tb_losses),
-    )
-
-
-def loss_fn_db(
-    key: RandomKey,
-    model_state: TrainState,
-    params: ModelParams,
-    rnd_partial: Callable[[RandomKey, TrainState, ModelParams], tuple[Array, ...]],
-    reg_coef: float = 0.0,
-    huber_delta: float | None = None,
-):
-    (trajectories, log_rewards, log_pfs_over_pbs, fwd_clf_logits, log_fs) = rnd_partial(
-        key, model_state, params
-    )
-
-    db_discrepancy = log_fs[:, :-1] + log_pfs_over_pbs - log_fs[:, 1:]
-    db_discrepancy = db_discrepancy
-
-    if huber_delta is not None:
-        db_losses = jnp.where(
-            jnp.abs(db_discrepancy) <= huber_delta,
-            jnp.square(db_discrepancy),
-            huber_delta * jnp.abs(db_discrepancy) - 0.5 * huber_delta**2,
-        )
-    else:
-        db_losses = jnp.square(db_discrepancy)
-
-    losses = db_losses.mean(-1) + reg_coef * jnp.exp(log_fs[:, 1:]).mean(-1)
-
-    return jnp.mean(losses), (
-        trajectories[:, -1],
-        jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),
-        log_rewards,
-        jax.lax.stop_gradient(db_losses),
-    )
-
-
-def loss_fn_subtb(
-    key: RandomKey,
-    model_state: TrainState,
-    params: ModelParams,
-    rnd_partial: Callable[[RandomKey, TrainState, ModelParams], tuple[Array, ...]],
-    n_chunks: int,
-    reg_coef: float = 0.0,
-    huber_delta: float | None = None,
-):
-    (trajectories, log_rewards, log_pfs_over_pbs, fwd_clf_logits, log_fs) = rnd_partial(
-        key, model_state, params
-    )
-
-    bs, T = log_pfs_over_pbs.shape
-    assert T % n_chunks == 0
-    chunk_size = T // n_chunks
-
-    # db_discrepancy = log_fs[:, :-1] + log_pfs_over_pbs - log_fs[:, 1:]
-    # subtb_discrepancy1 = db_discrepancy.reshape(bs, n_chunks, -1).sum(-1)
-    # The below is equivalent to the above lines but avoids numerical instability.
-    subtb_discrepancy1 = (
-        log_fs[:, :-1:chunk_size]
-        + log_pfs_over_pbs.reshape(bs, n_chunks, -1).sum(-1)
-        - log_fs[:, chunk_size::chunk_size]
-    )
-
-    log_pfs_over_pbs_cumsum = jnp.cumsum(log_pfs_over_pbs[:, ::-1], axis=-1)[:, ::-1]
-    subtb_discrepancy2 = (
-        log_fs[:, :-1:chunk_size]
-        + log_pfs_over_pbs_cumsum[:, ::chunk_size]
-        - log_fs[:, [-1]]
-    ) / jnp.arange(1, n_chunks + 1)[None, ::-1]
-
-    # subtb_discrepancy = subtb_discrepancy1
-    # subtb_discrepancy = subtb_discrepancy2
-    subtb_discrepancy = jnp.concatenate(
-        [subtb_discrepancy1, subtb_discrepancy2], axis=1
-    )
-
-    if huber_delta is not None:
-        subtb_losses = jnp.where(
-            jnp.abs(subtb_discrepancy) <= huber_delta,
-            jnp.square(subtb_discrepancy),
-            huber_delta * jnp.abs(subtb_discrepancy) - 0.5 * huber_delta**2,
-        )
-    else:
-        subtb_losses = jnp.square(subtb_discrepancy)
-
-    losses = subtb_losses.mean(-1) + reg_coef * jnp.exp(log_fs[:, 1:]).mean(-1)
-
-    return jnp.mean(losses), (
-        trajectories[:, -1],
-        jax.lax.stop_gradient(-log_pfs_over_pbs).sum(-1),
-        log_rewards,
-        jax.lax.stop_gradient(subtb_losses),
     )
 
 
@@ -384,66 +366,75 @@ def per_sample_rnd_eval(
     aux_tuple,
     target,
     num_steps,
+    num_levels,
+    use_lp,
     initial_dist,
     prior_to_target=True,
 ):
-    (logr_clip,) = aux_tuple
+    (logr_clip, compute_level_log_reward) = aux_tuple
 
-    def model_forward(s, langevin, force_stop=False):
+    def model_forward(s, l, log_reward, langevin, force_stop=False):
         return model_state.apply_fn(
             params,
             s,
-            None,
+            l,
+            log_reward,
             langevin,
             predict_fwd=True,
             force_stop=force_stop,
         )
 
-    def model_backward(s_next, force_stop=False):
+    def model_backward(s_next, l_next, force_stop=False):
         return model_state.apply_fn(
-            params,
-            s_next,
-            predict_fwd=False,
-            force_stop=force_stop,
+            params, s_next, l_next, predict_fwd=False, force_stop=force_stop
         )
 
-    def compute_log_reward_and_langevin(s):
-        return jax.lax.stop_gradient(jax.value_and_grad(target.log_prob)(s))
+    def compute_log_reward_and_langevin(s, l):
+        if use_lp:
+            return jax.lax.stop_gradient(
+                jax.value_and_grad(compute_level_log_reward)(s, l)
+            )
+        return jax.lax.stop_gradient(compute_level_log_reward(s, l)), None
 
     def cond_fun(carry):
         state, _ = carry
-        s, is_terminal, key_gen, step = state
+        s, l, is_terminal, key_gen, step = state
         return (jnp.any(~is_terminal)) & (step < num_steps)
 
     def simulate_prior_to_target(carry, force_stop=False):
         state, state_hist = carry
-        s, is_terminal, key_gen, step = state
+        s, l, is_terminal, key_gen, step = state
         trajectories, terminals_mask, fwd_log_probs, bwd_log_probs = state_hist
 
         s = jax.lax.stop_gradient(s)
-        log_reward, langevin = compute_log_reward_and_langevin(s)
+        log_reward, langevin = compute_log_reward_and_langevin(s, l)
         log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
         fwd_clf_logits, fwd_mean, fwd_scale, _ = model_forward(
             s,
+            l,
+            log_reward,
             langevin,
             force_stop=force_stop,
         )
         key, key_gen = jax.random.split(key_gen)
-        is_terminal_next = is_terminal | jax.random.bernoulli(
-            key, nn.sigmoid(fwd_clf_logits)
-        )
+        jump_to_next_level = jax.random.bernoulli(key, nn.sigmoid(fwd_clf_logits))
+        if force_stop:
+            jump_to_next_level = jnp.array(True)
+        l_next = jnp.where(jump_to_next_level, jnp.minimum(l + 1, num_levels), l)
+        reached_last_level_terminal = jump_to_next_level & (l == num_levels)
+        is_terminal_next = is_terminal | reached_last_level_terminal
         s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
         s_next = jax.lax.stop_gradient(s_next)
         fwd_log_prob = log_prob_kernel(s_next, fwd_mean, fwd_scale) + nn.log_sigmoid(
             -fwd_clf_logits
         )
         fwd_log_prob = jnp.where(
-            is_terminal_next, nn.log_sigmoid(fwd_clf_logits), fwd_log_prob
+            jump_to_next_level, nn.log_sigmoid(fwd_clf_logits), fwd_log_prob
         )
         fwd_log_prob = jnp.where(
             is_terminal, jnp.zeros_like(fwd_clf_logits), fwd_log_prob
         )
-        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next)
+        bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next, l_next)
         bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jax.nn.log_sigmoid(
             -bwd_clf_logits
         )
@@ -459,7 +450,7 @@ def per_sample_rnd_eval(
         fwd_log_probs = fwd_log_probs.at[step].set(fwd_log_prob)
         bwd_log_probs = bwd_log_probs.at[step].set(bwd_log_prob)
 
-        state_next = (s_next, is_terminal_next, key_gen, step + 1)
+        state_next = (s_next, l_next, is_terminal_next, key_gen, step + 1)
         state_hist = (
             trajectories,
             terminals_mask,
@@ -470,32 +461,38 @@ def per_sample_rnd_eval(
 
     def simulate_target_to_prior(carry, force_stop=False):
         state, state_hist = carry
-        s_next, is_terminal_next, key_gen, step = state
+        s_next, l_next, is_terminal_next, key_gen, step = state
         trajectories, terminals_mask, fwd_log_probs, bwd_log_probs = state_hist
         s_next = jax.lax.stop_gradient(s_next)
         bwd_clf_logits, bwd_mean, bwd_scale = model_backward(
             s_next,
+            l_next,
             force_stop=force_stop,
         )
         key, key_gen = jax.random.split(key_gen)
-        is_terminal = is_terminal_next | jax.random.bernoulli(
-            key, nn.sigmoid(bwd_clf_logits)
-        )
+        jump_to_prev_level = jax.random.bernoulli(key, nn.sigmoid(bwd_clf_logits))
+        if force_stop:
+            jump_to_prev_level = jnp.array(True)
+        l = jnp.where(jump_to_prev_level, jnp.maximum(l_next - 1, 1), l_next)
+        reached_first_level_terminal = jump_to_prev_level & (l_next == 1)
+        is_terminal = is_terminal_next | reached_first_level_terminal
         s, key_gen = sample_kernel(key_gen, bwd_mean, bwd_scale)
         s = jax.lax.stop_gradient(s)
         bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + nn.log_sigmoid(
             -bwd_clf_logits
         )
         bwd_log_prob = jnp.where(
-            is_terminal, nn.log_sigmoid(bwd_clf_logits), bwd_log_prob
+            jump_to_prev_level, nn.log_sigmoid(bwd_clf_logits), bwd_log_prob
         )
         bwd_log_prob = jnp.where(
             is_terminal_next, jnp.zeros_like(bwd_clf_logits), bwd_log_prob
         )
 
-        log_reward, langevin = compute_log_reward_and_langevin(s)
+        log_reward, langevin = compute_log_reward_and_langevin(s, l)
         log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
-        fwd_clf_logits, fwd_mean, fwd_scale, _ = model_forward(s, langevin)
+        fwd_clf_logits, fwd_mean, fwd_scale, _ = model_forward(
+            s, l, log_reward, langevin
+        )
 
         fwd_log_prob = log_prob_kernel(
             s_next, fwd_mean, fwd_scale
@@ -514,7 +511,7 @@ def per_sample_rnd_eval(
         fwd_log_probs = fwd_log_probs.at[step].set(fwd_log_prob)
         bwd_log_probs = bwd_log_probs.at[step].set(bwd_log_prob)
 
-        state_next = (s, is_terminal, key_gen, step + 1)
+        state_next = (s, l, is_terminal, key_gen, step + 1)
         state_hist = (
             trajectories,
             terminals_mask,
@@ -524,12 +521,13 @@ def per_sample_rnd_eval(
         return (state_next, state_hist)
 
     d = input_state.shape[-1]
-    trajectories = jnp.zeros((num_steps + 1, d))
-    terminals_mask = jnp.ones((num_steps + 1,), dtype=bool)
-    fwd_log_probs = jnp.zeros((num_steps + 1,))
-    bwd_log_probs = jnp.zeros((num_steps + 1,))
+    trajectories = jnp.zeros((num_steps + num_levels, d))
+    terminals_mask = jnp.ones((num_steps + num_levels,), dtype=bool)
+    fwd_log_probs = jnp.zeros((num_steps + num_levels,))
+    bwd_log_probs = jnp.zeros((num_steps + num_levels,))
     state_hist = (trajectories, terminals_mask, fwd_log_probs, bwd_log_probs)
-    state_init = (input_state, jnp.array(False), key, 0)
+    init_level = jnp.array(1) if prior_to_target else jnp.array(num_levels)
+    state_init = (input_state, init_level, jnp.array(False), key, 0)
     carry = (state_init, state_hist)
 
     if prior_to_target:
@@ -540,7 +538,8 @@ def per_sample_rnd_eval(
             max_steps=num_steps,
             kind="checkpointed",
         )
-        carry = simulate_prior_to_target(carry, force_stop=True)
+        for _ in range(num_levels):
+            carry = simulate_prior_to_target(carry, force_stop=True)
     else:
         carry = equinox.internal.while_loop(
             cond_fun,
@@ -549,7 +548,8 @@ def per_sample_rnd_eval(
             max_steps=num_steps,
             kind="checkpointed",
         )
-        carry = simulate_target_to_prior(carry, force_stop=True)
+        for _ in range(num_levels):
+            carry = simulate_target_to_prior(carry, force_stop=True)
 
     state, state_hist = carry
     return state_hist
@@ -563,6 +563,8 @@ def rnd_eval(
     aux_tuple,
     target,
     num_steps,
+    num_levels,
+    use_lp,
     prior_to_target=True,
     initial_dist: distrax.Distribution | None = None,
     terminal_xs: Array | None = None,
@@ -577,7 +579,7 @@ def rnd_eval(
     keys = jax.random.split(key_gen, num=batch_size)
     trajectories, terminals_mask, fwd_log_probs, bwd_log_probs = jax.vmap(
         per_sample_rnd_eval,
-        in_axes=(0, None, None, 0, None, None, None, None, None),
+        in_axes=(0, None, None, 0, None, None, None, None, None, None, None),
     )(
         keys,
         model_state,
@@ -586,6 +588,8 @@ def rnd_eval(
         aux_tuple,
         target,
         num_steps - 1,
+        num_levels,
+        use_lp,
         initial_dist,
         prior_to_target,
     )
@@ -601,7 +605,10 @@ def rnd_eval(
         # fmt: off
         init_xs = jax.lax.stop_gradient(input_states)
         init_fwd_log_probs = initial_dist.log_prob(init_xs)
-        bwd_clf_logits, *_ = model_state.apply_fn(params, init_xs, predict_fwd=False)
+        init_levels = jnp.ones((batch_size, 1), dtype=int)
+        bwd_clf_logits, *_ = model_state.apply_fn(
+            params, init_xs, init_levels, predict_fwd=False
+        )
 
         running_costs = running_costs + init_fwd_log_probs - nn.log_sigmoid(bwd_clf_logits)
     else:
@@ -619,7 +626,15 @@ def rnd_eval(
             log_rewards = target.log_prob(terminal_xs)
 
         terminal_xs = jax.lax.stop_gradient(terminal_xs)
-        fwd_clf_logits, *_ = model_state.apply_fn(params, terminal_xs, predict_fwd=True)
+        terminal_levels = jnp.full((batch_size, 1), num_levels)
+        fwd_clf_logits, *_ = model_state.apply_fn(
+            params,
+            terminal_xs,
+            terminal_levels,
+            None,
+            None,
+            predict_fwd=True,
+        )
         running_costs = running_costs + nn.log_sigmoid(fwd_clf_logits) - log_rewards
         trajectories = trajectories.at[jnp.arange(trajectories.shape[0]), trajectories_length - 1].set(
             terminal_xs
@@ -705,6 +720,7 @@ def rnd_mcmc(
     num_steps,
     step_name,
     initial_dist: distrax.Distribution | None = None,
+    prior_to_target: bool = True,
     terminal_xs: Array | None = None,
     input_states: Array | None = None,
 ):
@@ -734,71 +750,4 @@ def rnd_mcmc(
         jnp.zeros_like(log_rewards),
         log_rewards,
         num_steps * jnp.ones((trajectories.shape[0],), dtype=int),
-    )
-
-
-if __name__ == "__main__":
-    key = jax.random.PRNGKey(0)
-
-    # Define a dummy model class where we can hardcode values for testing
-    class DummyModel:
-        def apply_fn(
-            self,
-            params,
-            s,
-            log_reward=None,
-            lgv_term=None,
-            predict_fwd=True,
-        ):
-            # Emulate logic in non_acyclic_net.py's __call__
-            # Only basic logic/hardcoded but preserves output structure
-            if predict_fwd:
-                # Preserve same shape as s: (batch..., dim). For 1d s (dim,) use batch_shape=().
-                batch_shape = s.shape[:-1] if len(s.shape) > 1 else ()
-                fwd_clf_logits = jnp.full(batch_shape, 0.0)  # mimic logits
-                fwd_mean = s
-                fwd_scale = jnp.full(batch_shape + (s.shape[-1],), 1.0)
-                if log_reward is None:
-                    log_flow = jnp.zeros(batch_shape).astype(jnp.float32)
-                else:
-                    log_flow = s.astype(jnp.float32).squeeze(-1)
-                return fwd_clf_logits, fwd_mean, fwd_scale, log_flow
-            else:
-                batch_shape = s.shape[:-1] if len(s.shape) > 1 else ()
-                bwd_clf_logits = jnp.full(batch_shape, 0.0)  # mimic other logits
-                bwd_mean = s
-                bwd_scale = jnp.full(batch_shape + (s.shape[-1],), 1.0)
-                return bwd_clf_logits, bwd_mean, bwd_scale
-
-    class DummyTrainState:
-        def __init__(self):
-            self.apply_fn = DummyModel().apply_fn
-            self.params = {"params": {"logZ": -1.0}}
-            self.tx = None  # optimizer dummy
-
-    class DummyTarget:
-        def log_prob(self, x):
-            return -42 * jnp.ones_like(x[..., 0])
-
-    class DummyInitialDist:
-        def sample(self, seed, sample_shape):
-            return jnp.ones(sample_shape, dtype=jnp.float32)[:, None]
-
-        def log_prob(self, x):
-            return -13 * jnp.ones_like(x[..., 0])
-
-    # Use the dummy train state instead of the real one
-    model_state = DummyTrainState()
-    params = model_state.params
-    rnd_partial = rnd_with_term(
-        key,
-        model_state,
-        params,
-        2,
-        (1.0,),
-        DummyTarget(),
-        num_steps=5,
-        prior_to_target=False,
-        initial_dist=DummyInitialDist(),
-        terminal_xs=jnp.array([3.0, 2.0])[:, None],
     )

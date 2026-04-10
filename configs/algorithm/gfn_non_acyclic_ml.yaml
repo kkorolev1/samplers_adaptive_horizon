@@ -1,0 +1,50 @@
+# Generative Flow Networks (GFN) with Trajectory Balance (TB) loss
+name: gfn_non_acyclic_ml
+step_size: ${target.gfn_non_acyclic_ml.step_size}
+bwd_step_size: ${target.gfn_non_acyclic_ml.bwd_step_size}
+batch_size: ${target.all.batch_size}
+iters: ${target.all.iters}
+num_steps: ${target.gfn_non_acyclic_ml.num_steps}
+grad_clip: ${target.gfn_non_acyclic_ml.grad_clip}
+weight_decay: ${target.gfn_non_acyclic_ml.weight_decay}
+init_logZ: ${target.gfn_non_acyclic_ml.init_logZ}
+logZ_step_size: ${target.gfn_non_acyclic_ml.logZ_step_size}
+init_std: ${target.gfn_non_acyclic_ml.init_std}  # for ou
+logr_clip: ${target.gfn_non_acyclic_ml.logr_clip}
+huber_delta: ${target.gfn_non_acyclic_ml.huber_delta}
+reg_coef: ${target.gfn_non_acyclic_ml.reg_coef}
+eval_max_steps: ${target.gfn_non_acyclic_ml.eval_max_steps}
+num_levels: ${target.gfn_non_acyclic_ml.num_levels}
+use_weights: True
+
+# Learning rate scheduler
+lr_schedule:
+  type: multistep  # multistep | cosine | constant
+  milestones: ${target.all.milestones}  # iteration indices at which to decay
+  gamma: 1.0  # multiply LR by gamma at each milestone
+
+defaults:
+  - model: non_acyclic_net_ml
+
+model:
+  use_lp: ${target.all.use_lp}
+  num_hid: ${target.all.num_hid}
+  num_levels: ${target.gfn_non_acyclic_ml.num_levels}
+
+buffer:
+  use: True
+  max_length_in_batches: 100
+  prioritize_by: "reward"  # none, reward, loss, uiw, piw
+  target_ess: 0.05
+  sampling_method: "systematic"  # multinomial, stratified, systematic, rank
+  rank_k: 0.01  # only used if sampling_method is rank
+  sample_with_replacement: True
+  prefill_steps: 100  # collect `prefill_steps` batches before starting training
+  bwd_to_fwd_ratio: 2  # number of bwd steps per fwd step
+  update_score: False
+
+local_search:
+  use: True
+  cycle: 25
+  gamma: 1e-3
+  num_steps: 300

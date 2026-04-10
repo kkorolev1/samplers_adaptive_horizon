@@ -33,6 +33,22 @@ gfn_non_acyclic:
   huber_delta: null
   grad_clip: 1.0
 
+gfn_non_acyclic_ml:
+  init_std: 1.0
+  weight_decay: 0.0
+  step_size: 1e-3
+  bwd_step_size: 1e-3
+  logZ_step_size: 1e-1
+  init_logZ: 0.
+  gamma: 0.1
+  reg_coef: 0.0
+  num_steps: 100
+  eval_max_steps: 500
+  logr_clip: -1e5
+  huber_delta: null
+  grad_clip: 1.0
+  num_levels: 2
+
 diff_sampler_clf:
   weight_decay: 0.0
   step_size: 1e-3

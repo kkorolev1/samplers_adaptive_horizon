@@ -11,15 +11,13 @@ import jax.numpy as jnp
 
 import wandb
 
-from algorithms.common.diffusion_related.init_model import init_model
+from algorithms.common.diffusion_related.init_model import init_model_non_acyclic_ml
 from algorithms.common.eval_methods.stochastic_oc_methods import get_eval_fn
 from algorithms.gfn_non_acyclic_ml.buffer import build_terminal_state_buffer
 from algorithms.gfn_non_acyclic_ml.gfn_non_acyclic_ml_rnd import (
     rnd_train,
     rnd_mcmc,
     rnd_eval,
-    loss_fn_db,
-    loss_fn_subtb,
     loss_fn_prefix_tb,
 )
 from eval.utils import extract_last_entry
@@ -51,7 +49,22 @@ def gfn_non_acyclic_ml_trainer(cfg, target, exp=None):
     initial_dist = distrax.MultivariateNormalDiag(
         jnp.zeros(dim), jnp.ones(dim) * alg_cfg.init_std
     )
-    aux_tuple = (alg_cfg.logr_clip,)
+
+    betas = jnp.ones((alg_cfg.num_levels,))
+    betas = jnp.cumsum(betas) / jnp.sum(betas)
+    betas = jnp.concatenate([jnp.zeros(1), betas])
+    print(f"betas: {betas}")
+
+    def get_beta(l):
+        return betas[jnp.array(l, int)]
+
+    def compute_level_log_reward(s, l):
+        beta = get_beta(l)
+        if len(beta.shape) == 1:
+            beta = beta[None, :]
+        return beta * target.log_prob(s) + (1 - beta) * initial_dist.log_prob(s)
+
+    aux_tuple = (alg_cfg.logr_clip, compute_level_log_reward)
 
     # Initialize the buffer
     use_buffer = buffer_cfg.use
@@ -69,7 +82,7 @@ def gfn_non_acyclic_ml_trainer(cfg, target, exp=None):
 
     # Initialize the model
     key, key_gen = jax.random.split(key_gen)
-    model_state = init_model(key, dim, alg_cfg)
+    model_state = init_model_non_acyclic_ml(key, dim, alg_cfg)
 
     # Print number of parameters in the model
     def count_params(params):
@@ -89,6 +102,8 @@ def gfn_non_acyclic_ml_trainer(cfg, target, exp=None):
         aux_tuple=aux_tuple,
         target=target,
         num_steps=num_steps,
+        num_levels=alg_cfg.num_levels,
+        use_lp=alg_cfg.model.use_lp,
         initial_dist=initial_dist,
     )
     local_search_cfg = alg_cfg.local_search
@@ -106,30 +121,18 @@ def gfn_non_acyclic_ml_trainer(cfg, target, exp=None):
         aux_tuple=aux_tuple,
         target=target,
         num_steps=alg_cfg.eval_max_steps,
+        num_levels=alg_cfg.num_levels,
+        use_lp=alg_cfg.model.use_lp,
         initial_dist=initial_dist,
     )
-    if alg_cfg.loss_type == "db":
-        loss_fn_base = partial(
-            loss_fn_db,
-            huber_delta=alg_cfg.huber_delta,
-            reg_coef=reg_coef,
-        )
-    elif alg_cfg.loss_type == "subtb":
-        loss_fn_base = partial(
-            loss_fn_subtb,
-            huber_delta=alg_cfg.huber_delta,
-            n_chunks=alg_cfg.n_chunks,
-            reg_coef=reg_coef,
-        )
-    elif alg_cfg.loss_type == "tb":
-        loss_fn_base = partial(
-            loss_fn_prefix_tb,
-            huber_delta=alg_cfg.huber_delta,
-            reg_coef=reg_coef,
-            use_weights=alg_cfg.use_weights,
-        )
-    else:
-        raise ValueError(f"Unknown loss type {alg_cfg.loss_type}")
+    loss_fn_base = partial(
+        loss_fn_prefix_tb,
+        num_levels=alg_cfg.num_levels,
+        compute_level_log_reward=compute_level_log_reward,
+        huber_delta=alg_cfg.huber_delta,
+        reg_coef=reg_coef,
+        use_weights=alg_cfg.use_weights,
+    )
 
     # Define the function to be JIT-ed for FWD pass
     @partial(jax.jit)
@@ -282,7 +285,7 @@ def gfn_non_acyclic_ml_trainer(cfg, target, exp=None):
                 {
                     "loss": jnp.mean(losses),
                     ("loss_fwd" if is_on_policy_iter else "loss_bwd"): jnp.mean(losses),
-                    "logZ_learned": model_state.params["params"]["logZ"],
+                    "logZ_learned": model_state.params["params"]["logZ"][-1],
                     "params_l2_norm": params_norm,
                     "grads_l2_norm": grads_norm,
                 },
