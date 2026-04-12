@@ -22,6 +22,8 @@ from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import (
     loss_fn_subtb,
     loss_fn_prefix_tb,
 )
+from algorithms.gfn_non_acyclic.utils import visualize_heatmaps
+from eval.discrepancies import compute_sd
 from eval.utils import extract_last_entry
 from utils.print_utils import print_results
 
@@ -37,8 +39,6 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
     reg_coef = alg_cfg.reg_coef
 
     target_xs = target.sample(jax.random.PRNGKey(0), (cfg.eval_samples,))
-
-    from eval.discrepancies import compute_sd
 
     target_sds = []
     for i in range(5):
@@ -179,7 +179,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
         target,
         target_xs,
         cfg,
-        plot_heatmaps=True,
+        visualize_heatmaps_fn=visualize_heatmaps,
     )
     eval_freq = max(alg_cfg.iters // cfg.n_evals, 1)
 

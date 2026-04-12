@@ -20,8 +20,13 @@ from algorithms.gfn_non_acyclic_ml.gfn_non_acyclic_ml_rnd import (
     rnd_eval,
     loss_fn_prefix_tb,
 )
+from algorithms.gfn_non_acyclic_ml.utils import (
+    visualize_heatmaps,
+    visualize_level_log_reward,
+)
 from eval.utils import extract_last_entry
 from utils.print_utils import print_results
+from eval.discrepancies import compute_sd
 
 
 def gfn_non_acyclic_ml_trainer(cfg, target, exp=None):
@@ -35,8 +40,6 @@ def gfn_non_acyclic_ml_trainer(cfg, target, exp=None):
     reg_coef = alg_cfg.reg_coef
 
     target_xs = target.sample(jax.random.PRNGKey(0), (cfg.eval_samples,))
-
-    from eval.discrepancies import compute_sd
 
     target_sds = []
     for i in range(5):
@@ -172,7 +175,15 @@ def gfn_non_acyclic_ml_trainer(cfg, target, exp=None):
         target,
         target_xs,
         cfg,
+        visualize_heatmaps_fn=visualize_heatmaps,
     )
+
+    logger.update(
+        visualize_level_log_reward(
+            compute_level_log_reward, target, cfg, "level_rewards"
+        )
+    )
+
     eval_freq = max(alg_cfg.iters // cfg.n_evals, 1)
 
     ### Prefill phase; initialise logZ with mean of approximated logZs

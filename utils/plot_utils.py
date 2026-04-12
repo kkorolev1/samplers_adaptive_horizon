@@ -12,6 +12,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import wandb
+from functools import partial
 
 
 def plot_contours_2D(
@@ -71,14 +72,18 @@ def visualize_clf_heatmap(
     model_state,
     target,
     is_forward=True,
+    level=None,
     device="cpu",
     alpha=0.9,
     shrink=1.0,
     prefix="",
     show=False,
+    fig=None,
+    ax=None,
 ):
-    fig = plt.figure(figsize=(6, 6))
-    ax = fig.add_subplot()
+    if fig is None or ax is None:
+        fig = plt.figure(figsize=(6, 6))
+        ax = fig.add_subplot()
 
     bounds = (-target._plot_bound, target._plot_bound)
     x = jnp.linspace(*bounds, 50)
@@ -87,14 +92,20 @@ def visualize_clf_heatmap(
     grid = jnp.stack([X.ravel(), Y.ravel()], axis=1)
     grid = jax.device_put(grid, device)
 
+    model = partial(model_state.apply_fn)
+
+    if level is not None:
+        l = level * jnp.ones((*grid.shape[:-1], 1))
+        model = partial(model, l=l)
+
     if is_forward:
-        clf_logits, *_ = model_state.apply_fn(
+        clf_logits, *_ = model(
             model_state.params,
             grid,
             predict_fwd=True,
         )
     else:
-        clf_logits, *_ = model_state.apply_fn(
+        clf_logits, *_ = model(
             model_state.params,
             grid,
             predict_fwd=False,
@@ -131,9 +142,12 @@ def visualize_trajectories(
     alpha=0.8,
     prefix="",
     show=False,
+    fig=None,
+    ax=None,
 ):
-    fig = plt.figure(figsize=(6, 6))
-    ax = fig.add_subplot()
+    if fig is None or ax is None:
+        fig = plt.figure(figsize=(6, 6))
+        ax = fig.add_subplot()
 
     samples = trajectories[jnp.arange(trajectories.shape[0]), trajectories_length - 1]
     samples = samples[:, dims]
@@ -212,14 +226,18 @@ def visualize_trajectories(
 def visualize_flow_clf_heatmap(
     model_state,
     target,
+    level=None,
     device="cpu",
     alpha=0.9,
     shrink=1.0,
     prefix="",
     show=False,
+    fig=None,
+    ax=None,
 ):
-    fig = plt.figure(figsize=(6, 6))
-    ax = fig.add_subplot()
+    if fig is None or ax is None:
+        fig = plt.figure(figsize=(6, 6))
+        ax = fig.add_subplot()
 
     bounds = (-target._plot_bound, target._plot_bound)
     x = jnp.linspace(*bounds, 50)
@@ -229,13 +247,19 @@ def visualize_flow_clf_heatmap(
     grid = jax.device_put(grid, device)
 
     log_reward = target.log_prob(grid)
-    fwd_clf_logits, *_ = model_state.apply_fn(
+    model = partial(model_state.apply_fn)
+
+    if level is not None:
+        l = level * jnp.ones((*grid.shape[:-1], 1))
+        model = partial(model, l=l)
+
+    fwd_clf_logits, *_ = model(
         model_state.params,
         grid,
         log_reward=log_reward,
         predict_fwd=True,
     )
-    bwd_clf_logits, *_ = model_state.apply_fn(
+    bwd_clf_logits, *_ = model(
         model_state.params,
         grid,
         predict_fwd=False,
@@ -272,14 +296,18 @@ def visualize_flow_clf_heatmap(
 def visualize_flow_heatmap(
     model_state,
     target,
+    level=None,
     device="cpu",
     alpha=0.9,
     shrink=1.0,
     prefix="",
     show=False,
+    fig=None,
+    ax=None,
 ):
-    fig = plt.figure(figsize=(6, 6))
-    ax = fig.add_subplot()
+    if fig is None or ax is None:
+        fig = plt.figure(figsize=(6, 6))
+        ax = fig.add_subplot()
 
     bounds = (-target._plot_bound, target._plot_bound)
     x = jnp.linspace(*bounds, 50)
@@ -289,7 +317,13 @@ def visualize_flow_heatmap(
     grid = jax.device_put(grid, device)
 
     log_reward = target.log_prob(grid)
-    fwd_clf_logits, *_ = model_state.apply_fn(
+    model = partial(model_state.apply_fn)
+
+    if level is not None:
+        l = level * jnp.ones((*grid.shape[:-1], 1))
+        model = partial(model, l=l)
+
+    fwd_clf_logits, *_ = model(
         model_state.params,
         grid,
         predict_fwd=True,

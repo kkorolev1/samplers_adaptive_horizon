@@ -87,14 +87,17 @@ def per_sample_rnd_train(
         )
         s_next, key_gen = sample_kernel(key_gen, fwd_mean, fwd_scale)
         s_next = jax.lax.stop_gradient(s_next)
-        fwd_log_prob = log_prob_kernel(s_next, fwd_mean, fwd_scale) + jnp.where(
+        fwd_log_prob = jnp.where(
             l == l_next,
-            nn.log_sigmoid(-fwd_clf_logits),
+            log_prob_kernel(s_next, fwd_mean, fwd_scale)
+            + nn.log_sigmoid(-fwd_clf_logits),
             compute_level_log_reward(s_next, l),
         )
         bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next, l_next)
-        bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jnp.where(
-            l == l_next, nn.log_sigmoid(-bwd_clf_logits), nn.log_sigmoid(bwd_clf_logits)
+        bwd_log_prob = jnp.where(
+            l == l_next,
+            log_prob_kernel(s, bwd_mean, bwd_scale) + nn.log_sigmoid(-bwd_clf_logits),
+            nn.log_sigmoid(bwd_clf_logits),
         )
 
         # Return next state and per-step output
@@ -116,17 +119,20 @@ def per_sample_rnd_train(
         bwd_clf_logits, bwd_mean, bwd_scale = model_backward(s_next, l_next)
         s, key_gen = sample_kernel(key_gen, bwd_mean, bwd_scale)
         s = jax.lax.stop_gradient(s)
-        bwd_log_prob = log_prob_kernel(s, bwd_mean, bwd_scale) + jnp.where(
-            l == l_next, nn.log_sigmoid(-bwd_clf_logits), nn.log_sigmoid(bwd_clf_logits)
+        bwd_log_prob = jnp.where(
+            l == l_next,
+            log_prob_kernel(s, bwd_mean, bwd_scale) + nn.log_sigmoid(-bwd_clf_logits),
+            nn.log_sigmoid(bwd_clf_logits),
         )
         log_reward, langevin = compute_log_reward_and_langevin(s, l)
         log_reward = clip_log_reward(log_reward, clip_value=logr_clip)
         fwd_clf_logits, fwd_mean, fwd_scale, log_f = model_forward(
             s, l, log_reward, langevin
         )
-        fwd_log_prob = log_prob_kernel(s_next, fwd_mean, fwd_scale) + jnp.where(
+        fwd_log_prob = jnp.where(
             l == l_next,
-            nn.log_sigmoid(-fwd_clf_logits),
+            log_prob_kernel(s_next, fwd_mean, fwd_scale)
+            + nn.log_sigmoid(-fwd_clf_logits),
             compute_level_log_reward(s_next, l),
         )
 

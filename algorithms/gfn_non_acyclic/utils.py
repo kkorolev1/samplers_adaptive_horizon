@@ -1,4 +1,9 @@
 import math
+from utils.plot_utils import (
+    visualize_clf_heatmap,
+    visualize_flow_clf_heatmap,
+    visualize_flow_heatmap,
+)
 
 
 def get_invtemp(it: int, n_epochs: int, invtemp: float, invtemp_anneal: bool) -> float:
@@ -35,3 +40,40 @@ def linear_annealing(
         return start_val * ((end_val / start_val) ** (num / denom))
     else:
         return start_val + (end_val - start_val) * (num / denom)
+
+
+def visualize_heatmaps(logger, model_state, target, cfg, device):
+    logger.update(
+        visualize_clf_heatmap(
+            model_state,
+            target,
+            is_forward=True,
+            device=device,
+            prefix="fwd_clf",
+        )
+    )
+    logger.update(
+        visualize_clf_heatmap(
+            model_state,
+            target,
+            is_forward=False,
+            device=device,
+            prefix="bwd_clf",
+        )
+    )
+    logger.update(
+        visualize_flow_clf_heatmap(
+            model_state,
+            target,
+            device=device,
+            prefix="flow_bwd_clf",
+        )
+    )
+    logger.update(
+        visualize_flow_heatmap(
+            model_state,
+            target,
+            device=device,
+            prefix="flow",
+        )
+    )

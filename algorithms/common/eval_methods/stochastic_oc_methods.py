@@ -10,15 +10,11 @@ from eval.utils import (
     moving_averages,
     save_samples,
 )
-from utils.plot_utils import (
-    visualize_clf_heatmap,
-    visualize_flow_clf_heatmap,
-    visualize_flow_heatmap,
-    visualize_trajectories,
-)
+
+from utils.plot_utils import visualize_trajectories
 
 
-def get_eval_fn(rnd, target, target_xs, cfg, plot_heatmaps=False):
+def get_eval_fn(rnd, target, target_xs, cfg, visualize_heatmaps_fn=None):
     rnd_reverse = jax.jit(partial(rnd, prior_to_target=True))
 
     if cfg.compute_forward_metrics and target.can_sample:
@@ -93,41 +89,8 @@ def get_eval_fn(rnd, target, target_xs, cfg, plot_heatmaps=False):
             logger["max_traj_length/forward"].append(jnp.max(fwd_trajectories_length))
 
         logger.update(target.visualise(samples=samples))
-        if cfg.target.dim == 2 and plot_heatmaps:
-            logger.update(
-                visualize_clf_heatmap(
-                    model_state,
-                    target,
-                    is_forward=True,
-                    device=samples.device,
-                    prefix="fwd_clf",
-                )
-            )
-            logger.update(
-                visualize_clf_heatmap(
-                    model_state,
-                    target,
-                    is_forward=False,
-                    device=samples.device,
-                    prefix="bwd_clf",
-                )
-            )
-            logger.update(
-                visualize_flow_clf_heatmap(
-                    model_state,
-                    target,
-                    device=samples.device,
-                    prefix="flow_bwd_clf",
-                )
-            )
-            logger.update(
-                visualize_flow_heatmap(
-                    model_state,
-                    target,
-                    device=samples.device,
-                    prefix="flow",
-                )
-            )
+        if cfg.target.dim == 2 and visualize_heatmaps_fn is not None:
+            visualize_heatmaps_fn(logger, model_state, target, cfg, samples.device)
         logger.update(
             visualize_trajectories(
                 trajectories[:10],
