@@ -48,6 +48,20 @@ class GMM9(Target):
             components_distribution=components_dist,
         )
 
+        self._mix_dim = 2
+        if self.dim < self._mix_dim:
+            raise ValueError(f"GMM9 requires dim >= {self._mix_dim}, got {self.dim}")
+        if self.dim > self._mix_dim:
+            self._tail_dist = distrax.Independent(
+                distrax.Normal(
+                    loc=jnp.zeros(self.dim - self._mix_dim, dtype=jnp.float32),
+                    scale=jnp.ones(self.dim - self._mix_dim, dtype=jnp.float32),
+                ),
+                reinterpreted_batch_ndims=1,
+            )
+        else:
+            self._tail_dist = None
+
         self._plot_bound = 7
 
     def log_prob(self, x: chex.Array) -> chex.Array:
@@ -55,7 +69,11 @@ class GMM9(Target):
         if not batched:
             x = x[None]
 
-        log_prob = self.distribution.log_prob(x)
+        x_mix = x[..., : self._mix_dim]
+        log_prob = self.distribution.log_prob(x_mix)
+        if self._tail_dist is not None:
+            log_prob = log_prob + self._tail_dist.log_prob(x[..., self._mix_dim :])
+
         if not batched:
             log_prob = jnp.squeeze(log_prob, axis=0)
         return log_prob
@@ -82,16 +100,36 @@ class GMM9(Target):
             components_distribution=components_dist,
         )
 
-        log_prob = t_marginal_distribution.log_prob(x)
+        x_mix = x[..., : self._mix_dim]
+        log_prob = t_marginal_distribution.log_prob(x_mix)
+        if self.dim > self._mix_dim:
+            x_tail = x[..., self._mix_dim :]
+            scale_t = jnp.sqrt(
+                (1.0 - lambda_t) * jnp.ones(self.dim - self._mix_dim, dtype=jnp.float32)
+                + (init_std**2) * lambda_t
+            )
+            tail_dist = distrax.Independent(
+                distrax.Normal(loc=jnp.zeros_like(scale_t), scale=scale_t),
+                reinterpreted_batch_ndims=1,
+            )
+            log_prob = log_prob + tail_dist.log_prob(x_tail)
+
         if not batched:
             log_prob = jnp.squeeze(log_prob, axis=0)
         return log_prob
 
     def sample(self, seed: chex.PRNGKey, sample_shape: chex.Shape = ()) -> chex.Array:
-        return self.distribution.sample(seed=seed, sample_shape=sample_shape)
+        if self._tail_dist is None:
+            return self.distribution.sample(seed=seed, sample_shape=sample_shape)
+        key_mix, key_tail = jax.random.split(seed)
+        x_mix = self.distribution.sample(seed=key_mix, sample_shape=sample_shape)
+        x_tail = self._tail_dist.sample(seed=key_tail, sample_shape=sample_shape)
+        return jnp.concatenate([x_mix, x_tail], axis=-1)
 
     def entropy(self, samples: chex.Array = None):
-        expanded = jnp.expand_dims(samples, axis=-2)
+        # Mixture structure lives in the first _mix_dim coordinates only
+        s_mix = samples[..., : self._mix_dim]
+        expanded = jnp.expand_dims(s_mix, axis=-2)
         # Compute `log_prob` in every component.
         idx = jnp.argmax(
             self.distribution.components_distribution.log_prob(expanded), 1
@@ -139,7 +177,37 @@ class GMM9(Target):
                 plt.close()
             return wb
         else:
-            return {}  # TODO: add visualisation for higher dimensions
+            # Same as dim==2: plot_contours_2D builds (N, dim) with 0 on non-marginal axes,
+            # which matches product target (GMM on first 2 coords, N(0,1) on the rest).
+            fig = plt.figure(figsize=(6, 6))
+            ax = fig.add_subplot()
+            marginal_dims = (0, 1)
+            bounds = (-self._plot_bound, self._plot_bound)
+            fn = log_prob_fn or self.log_prob
+            plot_contours_2D(
+                fn,
+                self.dim,
+                ax,
+                marginal_dims=marginal_dims,
+                bounds=bounds,
+                levels=50,
+            )
+            if samples is not None:
+                plot_marginal_pair(
+                    samples[:, marginal_dims],
+                    ax,
+                    marginal_dims=marginal_dims,
+                    bounds=bounds,
+                )
+            plt.xticks([])
+            plt.yticks([])
+
+            wb = {f"figures/{prefix + '_' if prefix else ''}vis": [wandb.Image(fig)]}
+            if show:
+                plt.show()
+            else:
+                plt.close()
+            return wb
 
 
 if __name__ == "__main__":

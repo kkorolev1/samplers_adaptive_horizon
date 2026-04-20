@@ -29,7 +29,7 @@ from algorithms.gfn_subtb_smc.gfn_subtb_smc_rnd import batch_simulate_fwd_subtra
 from algorithms.gfn_tb.buffer import build_terminal_state_buffer
 from algorithms.gfn_tb.sampling_utils import get_sampling_func
 from algorithms.gfn_tb.utils import get_invtemp
-from eval.utils import extract_last_entry
+from eval.utils import extract_last_entry, save_plot_images
 from utils.print_utils import print_results
 
 
@@ -393,5 +393,8 @@ def gfn_subtb_smc_trainer(cfg, target):
 
             print_results(it, logger, cfg)
 
+            last_entry = extract_last_entry(logger)
+            if getattr(cfg, "save_local_plots", True):
+                save_plot_images(last_entry, cfg, it)
             if cfg.use_wandb:
-                wandb.log(extract_last_entry(logger), step=it)
+                wandb.log(last_entry, step=it)

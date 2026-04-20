@@ -8,7 +8,7 @@ from functools import partial
 import distrax
 import jax
 import jax.numpy as jnp
-
+import optax
 import wandb
 
 from algorithms.common.diffusion_related.init_model import init_model_non_acyclic
@@ -284,6 +284,9 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
                 samples,
                 log_rewards,
             )
+            if alg_cfg.off_policy_grad_clip > 0:
+                clip_fn = optax.clip_by_global_norm(alg_cfg.off_policy_grad_clip)
+                grads, _ = clip_fn.update(grads, clip_fn.init(model_state.params))
             model_state = model_state.apply_gradients(grads=grads)
 
             # Update scores in buffer if needed

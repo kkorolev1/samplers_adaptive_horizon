@@ -6,12 +6,14 @@ batch_size: ${target.all.batch_size}
 iters: ${target.all.iters}
 num_steps: ${target.gfn_non_acyclic.num_steps}
 grad_clip: ${target.gfn_non_acyclic.grad_clip}
+off_policy_grad_clip: ${target.gfn_non_acyclic.grad_clip}
 weight_decay: ${target.gfn_non_acyclic.weight_decay}
 loss_type: ${target.gfn_non_acyclic.loss_type}
 n_chunks: ${target.gfn_non_acyclic.num_steps}
 init_logZ: ${target.gfn_non_acyclic.init_logZ}
 logZ_step_size: ${target.gfn_non_acyclic.logZ_step_size}
 init_std: ${target.gfn_non_acyclic.init_std}  # for ou
+init_mean: 0.0  # mean of initial_dist Gaussian
 logr_clip: ${target.gfn_non_acyclic.logr_clip}
 huber_delta: ${target.gfn_non_acyclic.huber_delta}
 reg_coef: ${target.gfn_non_acyclic.reg_coef}

@@ -1,3 +1,6 @@
+import os
+import re
+
 import jax.numpy as jnp
 
 from utils.path_utils import project_path
@@ -36,6 +39,18 @@ def extract_last_entry(dictionary):
         except:
             pass
     return last_entries
+
+
+def save_plot_images(last_entries, cfg, step, image_ext="png"):
+    """Persist wandb.Image entries from logger to local files."""
+    figures_dir = project_path(f"{cfg.log_dir}/figures")
+    os.makedirs(figures_dir, exist_ok=True)
+
+    for key, value in last_entries.items():
+        if hasattr(value, "image") and value.image is not None:
+            safe_key = re.sub(r"[^0-9A-Za-z_.-]+", "_", str(key)).strip("_")
+            filename = f"step_{int(step):07d}_{safe_key}.{image_ext}"
+            value.image.save(os.path.join(figures_dir, filename))
 
 
 def save_samples(cfg, logger, samples):

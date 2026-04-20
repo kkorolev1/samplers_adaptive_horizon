@@ -98,4 +98,3 @@ all: # Parameters that are shared between all algorithms
   use_lp: False
   num_hid: 256
 
-

@@ -19,10 +19,13 @@ from utils.path_utils import project_path
 class Gaussian(Target):
     def __init__(self, dim, log_Z=0.0, can_sample=True, sample_bounds=None) -> None:
         super().__init__(dim, log_Z, can_sample)
+        self._plot_bound = 7.0
 
         # parameters
-        min_mean_val = -1
+        # min_mean_val = -1
         max_mean_val = 1
+        min_mean_val = 0
+        max_mean_val = 0
         degree_of_freedom_wishart = dim + 2
 
         seed = jax.random.PRNGKey(0)
@@ -39,7 +42,8 @@ class Gaussian(Target):
         locs = jnp.zeros((dim,))
         cov_matrix = jnp.eye(dim)
 
-        self.pdf = dist.MultivariateNormal(locs, jnp.array(cov_matrix))
+        # self.pdf = dist.MultivariateNormal(locs, jnp.array(cov_matrix))
+        self.pdf = dist.MultivariateNormal(locs, jnp.eye(self.dim))
         # self.pdf = dist.MultivariateNormal(jnp.zeros(self.dim), 2.5 **2 * jnp.eye(self.dim))
         self._plot_bound = 5
 

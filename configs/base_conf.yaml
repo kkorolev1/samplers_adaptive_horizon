@@ -17,9 +17,13 @@ moving_average:  # Moving average over subsequent evaluations
 discrepancies: [sd, mmd]  # IPMs: Sinkhorn (Entropy-regularized Wasserstein Distance) and Maximum Mean Discrepancy
 compute_emc: True  # Entropic Mode Coverage
 compute_forward_metrics: True
-# use_wandb: True
+use_wandb: False
 use_cometml: True
 verbose: True  # Intermediate results are printed if True
 visualize_samples: True  # Samples are visualized if target density permitts
+save_local_plots: False  # Save visualized figures to ${log_dir}/figures
+trajectory_viz:
+  num_examples: 6  # figures/trajectories_{fwd,bwd}_vis_exNN_{density,clf}
+  log_drift_field: True  # figures/drift_{fwd,bwd}_quiver (gfn_non_acyclic eval)
 save_samples: False  # Save samples with highest ELBO
 save_model: False  # Checkpointing is currently not implemented

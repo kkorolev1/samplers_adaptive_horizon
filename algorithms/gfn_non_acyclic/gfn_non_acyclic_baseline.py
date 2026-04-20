@@ -14,7 +14,7 @@ import wandb
 from algorithms.common.diffusion_related.init_model import init_model_non_acyclic
 from algorithms.common.eval_methods.mcmc_methods import get_eval_fn
 from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import rnd_mcmc
-from eval.utils import extract_last_entry
+from eval.utils import extract_last_entry, save_plot_images
 from utils.print_utils import print_results
 
 
