@@ -114,7 +114,7 @@ gfn_non_acyclic:
   bwd_step_size: 1e-3
   logZ_step_size: 1e-1
   init_logZ: 0.
-  gamma: 0.1
+  # gamma: 0.1
   reg_coef: 0.0
   num_steps: 100
   eval_max_steps: 500
@@ -122,6 +122,7 @@ gfn_non_acyclic:
   logr_clip: -1e5
   huber_delta: null
   grad_clip: 1.0
+  # no_term: False
 
 all: # Parameters that are shared between all algorithms
   batch_size: 2000

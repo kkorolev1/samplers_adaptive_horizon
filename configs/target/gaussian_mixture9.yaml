@@ -62,6 +62,11 @@ diff_sampler_clf:
   grad_clip: 1.0
   base_var: 5.0
 
+od_langevin:  # Overdamped Langevin (ULA/MCD); required by algorithm/ula.yaml interpolations
+  max_diffusion: 1.
+  init_std: 1.
+  step_size: 5e-4
+
 all: # Parameters that are shared between all algorithms
   batch_size: 2000
   iters: 30000

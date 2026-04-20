@@ -34,7 +34,7 @@ hydra-joblib-launcher==1.2.0
 hydra-submitit-launcher==1.2.0
 idna==3.11
 importlib_resources==6.5.2
-jax==0.6.2
+
 jaxlib==0.6.2
 jaxopt==0.8.5
 jaxtyping==0.3.4

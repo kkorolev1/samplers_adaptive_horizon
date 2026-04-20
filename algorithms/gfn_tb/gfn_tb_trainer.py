@@ -17,7 +17,7 @@ from algorithms.dds.dds_rnd import cos_sq_fn_step_scheme
 from algorithms.gfn_tb.buffer import build_terminal_state_buffer
 from algorithms.gfn_tb.gfn_tb_rnd import rnd, loss_fn
 from algorithms.gfn_tb.utils import get_invtemp
-from eval.utils import extract_last_entry
+from eval.utils import extract_last_entry, save_plot_images
 from utils.print_utils import print_results
 
 
@@ -240,8 +240,10 @@ def gfn_tb_trainer(cfg, target, exp=None):
 
             # if cfg.use_wandb:
             #     wandb.log(extract_last_entry(logger), step=it)
+            last_entry = extract_last_entry(logger)
+            if getattr(cfg, "save_local_plots", True):
+                save_plot_images(last_entry, cfg, it)
             if cfg.use_cometml:
-                last_entry = extract_last_entry(logger)
                 metrics = {}
                 for key, value in last_entry.items():
                     if isinstance(value, wandb.Image):

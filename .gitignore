@@ -191,7 +191,19 @@ utils/prior_gif.gif
 
 # Slurm
 scripts/
+logs/
+reports/
 slurm_logs/
+sbatch_logs_*/
+
+# Local run/output dirs; keep repo launchers tracked
+run_*
+!run.py
+run_cluster*.py
 
 .cometml-runs/**
 .DS_Store
+
+*.err
+configs/cometml_secret.yaml
+ula_script_torch.py

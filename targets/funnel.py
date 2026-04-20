@@ -19,7 +19,7 @@ class Funnel(Target):
         self.mean_other = jnp.zeros(dim - 1, dtype=float)
         self.cov_eye = jnp.eye(dim - 1).reshape((1, dim - 1, dim - 1))
         self.sample_bounds = sample_bounds
-        self._plot_bound = 5.0
+        self._plot_bound = 10.0
 
     def log_prob(self, x: chex.Array):
         batched = x.ndim == 2

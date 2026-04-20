@@ -1,6 +1,7 @@
 """Code builds on https://github.com/lollcat/fab-jax"""
 
 import itertools
+from functools import partial
 from typing import Optional, Tuple
 
 import chex
@@ -8,14 +9,15 @@ import jax
 import jax.nn as nn
 import jax.numpy as jnp
 import distrax
-import matplotlib.pyplot as plt
-import numpy as np
+import matplotlib.patheffects as patheffects
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from matplotlib.collections import LineCollection
 from matplotlib.colors import LinearSegmentedColormap
+import numpy as np
 import wandb
-from functools import partial
+from matplotlib.collections import LineCollection
+from matplotlib.colors import LinearSegmentedColormap, Normalize
 
 
 def plot_contours_2D(
@@ -156,11 +158,294 @@ def visualize_clf_heatmap(
     return wb
 
 
-import numpy as np
-import jax.numpy as jnp
-import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
-from matplotlib.colors import LinearSegmentedColormap
+def clf_sigmoid_grid(
+    model_state,
+    target,
+    device,
+    is_forward: bool,
+    level=None,
+    n_grid: int = 80,
+    marginal_dims: Tuple[int, int] = (0, 1),
+):
+    """2D grid of sigmoid(classifier logits); returns numpy X, Y, Z for plotting.
+
+    The network expects states of shape ``(dim,)``; we embed the 2D mesh into the
+    full space by fixing non-marginal coordinates to zero (same as density grid).
+    """
+    dim = int(target.dim)
+    d0, d1 = int(marginal_dims[0]), int(marginal_dims[1])
+    bounds = (-target._plot_bound, target._plot_bound)
+    x = jnp.linspace(*bounds, n_grid)
+    y = jnp.linspace(*bounds, n_grid)
+    X, Y = jnp.meshgrid(x, y, indexing="xy")
+    xy = jnp.stack([X.ravel(), Y.ravel()], axis=1)
+    grid = jnp.zeros((xy.shape[0], dim), dtype=xy.dtype)
+    grid = grid.at[:, d0].set(xy[:, 0]).at[:, d1].set(xy[:, 1])
+    grid = jax.device_put(grid, device)
+
+    model = partial(model_state.apply_fn)
+    if level is not None:
+        l = level * jnp.ones((*grid.shape[:-1], 1))
+        model = partial(model, l=l)
+
+    if is_forward:
+        clf_logits, *_ = model(model_state.params, grid, predict_fwd=True)
+    else:
+        clf_logits, *_ = model(model_state.params, grid, predict_fwd=False)
+    pdf = nn.sigmoid(clf_logits).reshape(X.shape)
+    return np.asarray(X), np.asarray(Y), np.asarray(pdf)
+
+
+def _marginal_embedded_grid(
+    target,
+    device,
+    marginal_dims: Tuple[int, int],
+    n_grid: int,
+):
+    """Meshgrid in ``(d0, d1)`` embedded in ``R^dim`` (other coords zero)."""
+    dim = int(target.dim)
+    d0, d1 = int(marginal_dims[0]), int(marginal_dims[1])
+    bounds = (-float(target._plot_bound), float(target._plot_bound))
+    x = jnp.linspace(bounds[0], bounds[1], n_grid)
+    y = jnp.linspace(bounds[0], bounds[1], n_grid)
+    X, Y = jnp.meshgrid(x, y, indexing="xy")
+    xy = jnp.stack([X.ravel(), Y.ravel()], axis=1)
+    grid = jnp.zeros((xy.shape[0], dim), dtype=xy.dtype)
+    grid = grid.at[:, d0].set(xy[:, 0]).at[:, d1].set(xy[:, 1])
+    grid = jax.device_put(grid, device)
+    return X, Y, grid
+
+
+def drift_vector_field_figures(
+    model_state,
+    target,
+    gamma: float,
+    device,
+    marginal_dims: Tuple[int, int] = (0, 1),
+    n_grid: int = 22,
+    quiver_stride: int = 2,
+    show: bool = False,
+):
+    """Log forward/backward drift fields ``(mean - s) / gamma`` on a 2D marginal slice.
+
+    Returns wandb image dict keys ``figures/drift_fwd_quiver`` and
+    ``figures/drift_bwd_quiver``.
+    """
+    d0, d1 = int(marginal_dims[0]), int(marginal_dims[1])
+    X, Y, grid = _marginal_embedded_grid(
+        target, device, marginal_dims, n_grid=n_grid
+    )
+    model = partial(model_state.apply_fn)
+    g = float(gamma)
+    if g == 0:
+        g = 1e-8
+
+    def _one_figure(predict_fwd: bool, prefix: str):
+        if predict_fwd:
+            _, mean, *_ = model(model_state.params, grid, predict_fwd=True)
+        else:
+            _, mean, _ = model(model_state.params, grid, predict_fwd=False)
+        drift = (mean - grid) / g
+        U = drift[:, d0].reshape(X.shape)
+        V = drift[:, d1].reshape(X.shape)
+        Xn = np.asarray(X)
+        Yn = np.asarray(Y)
+        Un = np.asarray(U)
+        Vn = np.asarray(V)
+        sl = slice(None, None, max(1, int(quiver_stride)))
+        fig = plt.figure(figsize=(6, 6))
+        ax = fig.add_subplot()
+        mag = np.hypot(Un, Vn)
+        cf = ax.contourf(
+            Xn,
+            Yn,
+            mag,
+            levels=20,
+            cmap="magma",
+            alpha=0.45,
+        )
+        ax.quiver(
+            Xn[sl, sl],
+            Yn[sl, sl],
+            Un[sl, sl],
+            Vn[sl, sl],
+            color="0.2",
+            angles="xy",
+            scale_units="xy",
+            width=0.005,
+        )
+        ax.set_xlabel(f"x{d0 + 1}")
+        ax.set_ylabel(f"x{d1 + 1}")
+        b = float(target._plot_bound)
+        ax.set_xlim(-b, b)
+        ax.set_ylim(-b, b)
+        ax.set_aspect("equal", adjustable="box")
+        ax.grid(True, linestyle="--", alpha=0.35)
+        plt.colorbar(cf, ax=ax, fraction=0.046, pad=0.04, label="|drift|")
+        wb = {f"figures/{prefix}_quiver": [wandb.Image(fig)]}
+        if show:
+            plt.show()
+        else:
+            plt.close(fig)
+        return wb
+
+    out = {}
+    out.update(_one_figure(True, "drift_fwd"))
+    out.update(_one_figure(False, "drift_bwd"))
+    return out
+
+
+def _marginal_density_grid(
+    target,
+    dim: int,
+    marginal_dims: Tuple[int, int],
+    bounds: tuple[float, float],
+    n_points: int = 110,
+):
+    x_points_dim1 = np.linspace(bounds[0], bounds[1], n_points)
+    x_points_dim2 = np.linspace(bounds[0], bounds[1], n_points)
+    x_points = np.array(list(itertools.product(x_points_dim1, x_points_dim2)))
+
+    def sliced_log_prob(x_arr):
+        xj = jnp.asarray(x_arr)
+        _x = jnp.zeros((xj.shape[0], dim))
+        _x = _x.at[:, marginal_dims].set(xj)
+        return target.log_prob(_x)
+
+    log_probs = sliced_log_prob(x_points)
+    log_probs = jnp.clip(log_probs, a_min=-1000, a_max=None)
+    z = jnp.exp(log_probs).reshape(n_points, n_points)
+    x1 = x_points[:, 0].reshape(n_points, n_points)
+    x2 = x_points[:, 1].reshape(n_points, n_points)
+    return np.asarray(x1), np.asarray(x2), np.asarray(z)
+
+
+_TRAJ_BG_CMAP = LinearSegmentedColormap.from_list(
+    "traj_blue_green", ["#1f77ff", "#2ca02c"]
+)
+
+
+def _plot_gradient_trajectory(ax: plt.Axes, xy: np.ndarray, linewidth: float = 3.5):
+    """Blue (start) → green (end) path with white stroke so it reads on heatmaps."""
+    if xy.shape[0] < 2:
+        ax.scatter(
+            xy[0, 0],
+            xy[0, 1],
+            c=[_TRAJ_BG_CMAP(0.5)],
+            s=85,
+            edgecolors="black",
+            zorder=5,
+        )
+        return
+    pts = xy.reshape(-1, 1, 2)
+    segments = np.concatenate([pts[:-1], pts[1:]], axis=1)
+    nseg = len(segments)
+    lc = LineCollection(
+        segments,
+        cmap=_TRAJ_BG_CMAP,
+        norm=Normalize(0.0, 1.0),
+        linewidths=linewidth,
+        zorder=4,
+        capstyle="round",
+    )
+    lc.set_array(np.linspace(0.0, 1.0, nseg))
+    lc.set_path_effects(
+        [patheffects.withStroke(linewidth=linewidth + 2.5, foreground="white")]
+    )
+    ax.add_collection(lc)
+    ax.scatter(
+        xy[0, 0],
+        xy[0, 1],
+        c=[_TRAJ_BG_CMAP(0.0)],
+        s=85,
+        edgecolors="black",
+        zorder=5,
+    )
+    ax.scatter(
+        xy[-1, 0],
+        xy[-1, 1],
+        c=[_TRAJ_BG_CMAP(1.0)],
+        s=85,
+        edgecolors="black",
+        marker="X",
+        zorder=5,
+    )
+
+
+def visualize_trajectory_examples(
+    trajectories,
+    trajectories_length,
+    target,
+    model_state,
+    dims=(0, 1),
+    device="cpu",
+    prefix="trajectories_fwd",
+    num_examples: int = 6,
+    clf_is_forward: bool = True,
+    use_classifier_bg: bool = False,
+    show: bool = False,
+):
+    """One figure per example: density background and optional classifier background.
+
+    Keys: ``figures/{prefix}_vis_exNN_density`` and ``figures/{prefix}_vis_exNN_clf``.
+    """
+    batch_size = int(trajectories.shape[0])
+    n = min(int(num_examples), batch_size)
+    dim = int(target.dim)
+    bounds = (-float(target._plot_bound), float(target._plot_bound))
+    d0, d1 = int(dims[0]), int(dims[1])
+
+    x1d, x2d, zd = _marginal_density_grid(target, dim, (d0, d1), bounds, n_points=110)
+
+    Xc = Yc = Zc = None
+    if use_classifier_bg and model_state is not None:
+        Xc, Yc, Zc = clf_sigmoid_grid(
+            model_state,
+            target,
+            device,
+            clf_is_forward,
+            n_grid=80,
+            marginal_dims=(d0, d1),
+        )
+
+    out = {}
+    for i in range(n):
+        tl = int(trajectories_length[i])
+        valid = trajectories[i, :tl]
+        xy = np.asarray(jnp.stack([valid[:, d0], valid[:, d1]], axis=1))
+
+        fig_d, ax_d = plt.subplots(figsize=(6, 6))
+        ax_d.contourf(x1d, x2d, zd, levels=24, cmap="copper", alpha=0.45)
+        _plot_gradient_trajectory(ax_d, xy)
+        ax_d.set_xlabel(f"x{d0 + 1}")
+        ax_d.set_ylabel(f"x{d1 + 1}")
+        ax_d.set_xlim(bounds[0], bounds[1])
+        ax_d.set_ylim(bounds[0], bounds[1])
+        ax_d.set_aspect("equal", adjustable="box")
+        ax_d.grid(True, linestyle="--", alpha=0.35)
+        out[f"figures/{prefix}_vis_ex{i:02d}_density"] = [wandb.Image(fig_d)]
+        if show:
+            plt.show()
+        else:
+            plt.close(fig_d)
+
+        if use_classifier_bg and model_state is not None and Zc is not None:
+            fig_c, ax_c = plt.subplots(figsize=(6, 6))
+            ax_c.pcolormesh(Xc, Yc, Zc, cmap="viridis", alpha=0.52, shading="auto")
+            _plot_gradient_trajectory(ax_c, xy)
+            ax_c.set_xlabel(f"x{d0 + 1}")
+            ax_c.set_ylabel(f"x{d1 + 1}")
+            ax_c.set_xlim(bounds[0], bounds[1])
+            ax_c.set_ylim(bounds[0], bounds[1])
+            ax_c.set_aspect("equal", adjustable="box")
+            ax_c.grid(True, linestyle="--", alpha=0.35)
+            out[f"figures/{prefix}_vis_ex{i:02d}_clf"] = [wandb.Image(fig_c)]
+            if show:
+                plt.show()
+            else:
+                plt.close(fig_c)
+
+    return out
 
 
 def visualize_trajectories(

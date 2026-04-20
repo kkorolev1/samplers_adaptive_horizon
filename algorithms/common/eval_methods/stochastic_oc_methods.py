@@ -2,7 +2,6 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
-import jax.nn as nn
 
 from eval import discrepancies
 from eval.utils import (
@@ -11,7 +10,24 @@ from eval.utils import (
     save_samples,
 )
 
-from utils.plot_utils import visualize_trajectories
+from utils.plot_utils import (
+    drift_vector_field_figures,
+    visualize_trajectory_examples,
+    visualize_trajectories,
+)
+
+
+def _trajectory_num_examples(cfg):
+    tv = getattr(cfg, "trajectory_viz", None)
+    if tv is None:
+        return 6
+    return int(getattr(tv, "num_examples", 6))
+
+
+def _model_state_for_clf(model_state):
+    if isinstance(model_state, tuple):
+        return model_state[0]
+    return model_state
 
 
 def get_eval_fn(rnd, target, target_xs, cfg, visualize_heatmaps_fn=None):
@@ -92,21 +108,59 @@ def get_eval_fn(rnd, target, target_xs, cfg, visualize_heatmaps_fn=None):
             visualize_heatmaps_fn(
                 logger, model_state, target, target_xs, cfg, samples.device
             )
+        if visualize_heatmaps_fn is not None:
+            tv = getattr(cfg, "trajectory_viz", None)
+            log_drift = (
+                bool(getattr(tv, "log_drift_field", True))
+                if tv is not None
+                else True
+            )
+            if log_drift:
+                ms_drift = _model_state_for_clf(model_state)
+                gamma = float(cfg.algorithm.model.gamma)
+                logger.update(
+                    drift_vector_field_figures(
+                        ms_drift,
+                        target,
+                        gamma,
+                        samples.device,
+                        marginal_dims=(0, 1),
+                    )
+                )
+        use_clf_bg = visualize_heatmaps_fn is not None
+        ms_clf = _model_state_for_clf(model_state)
+        n_traj_ex = _trajectory_num_examples(cfg)
+        # Batch overlay (all trajectories in one axes; first 10 paths)
         logger.update(
             visualize_trajectories(
-                trajectories[:3],
-                trajectories_length[:3],
+                trajectories[:10],
+                trajectories_length[:10],
                 target,
                 dims=(0, 1),
                 device=samples.device,
                 prefix="trajectories_fwd",
             )
         )
+        # Per-example panels (density + optional clf background)
+        logger.update(
+            visualize_trajectory_examples(
+                trajectories,
+                trajectories_length,
+                target,
+                ms_clf if use_clf_bg else None,
+                dims=(0, 1),
+                device=samples.device,
+                prefix="trajectories_fwd",
+                num_examples=n_traj_ex,
+                clf_is_forward=True,
+                use_classifier_bg=use_clf_bg,
+            )
+        )
         if cfg.compute_forward_metrics and target.can_sample:
             logger.update(
                 visualize_trajectories(
-                    fwd_trajectories[:3],
-                    fwd_trajectories_length[:3],
+                    fwd_trajectories[:10],
+                    fwd_trajectories_length[:10],
                     target,
                     dims=(0, 1),
                     device=samples.device,
