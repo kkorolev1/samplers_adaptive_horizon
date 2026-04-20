@@ -7,10 +7,13 @@ import chex
 import jax
 import jax.nn as nn
 import jax.numpy as jnp
+import distrax
 import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+from matplotlib.collections import LineCollection
+from matplotlib.colors import LinearSegmentedColormap
 import wandb
 from functools import partial
 
@@ -71,8 +74,10 @@ def plot_marginal_pair(
 def visualize_clf_heatmap(
     model_state,
     target,
+    cfg,
     is_forward=True,
     level=None,
+    dims=(0, 1),
     device="cpu",
     alpha=0.9,
     shrink=1.0,
@@ -118,94 +123,22 @@ def visualize_clf_heatmap(
     )
     cbar.ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:.2f}"))
 
-    ax.set_xlabel("x1")
-    ax.set_ylabel("x2")
-    ax.grid(True, linestyle="--", alpha=0.6)
-    ax.set_xlim((x.min(), x.max()))
-    ax.set_ylim((y.min(), y.max()))
-    ax.set_aspect("equal", adjustable="box")
-
-    wb = {f"figures/{prefix + '_' if prefix else ''}vis": [wandb.Image(fig)]}
-    if show:
-        plt.show()
-    else:
-        plt.close()
-    return wb
-
-
-def visualize_trajectories(
-    trajectories,
-    trajectories_length,
-    target,
-    dims=(0, 1),
-    device="cpu",
-    alpha=0.8,
-    prefix="",
-    show=False,
-    fig=None,
-    ax=None,
-):
-    if fig is None or ax is None:
-        fig = plt.figure(figsize=(6, 6))
-        ax = fig.add_subplot()
-
-    samples = trajectories[jnp.arange(trajectories.shape[0]), trajectories_length - 1]
-    samples = samples[:, dims]
-    min_bounds = samples.min(axis=0) - 1.5
-    max_bounds = samples.max(axis=0) + 1.5
-
-    batch_size = trajectories.shape[0]
-
-    cmap = plt.get_cmap("viridis")
-    colors = cmap(jnp.linspace(0, 1, batch_size))
-
-    marker_size = 50
-
-    x = jnp.linspace(min_bounds[0], max_bounds[0], 50)
-    y = jnp.linspace(min_bounds[1], max_bounds[1], 50)
-
-    # if trajectories.shape[-1] == 2:
-    #     X, Y = jnp.meshgrid(x, y, indexing="xy")
-    #     grid = jnp.stack([X.ravel(), Y.ravel()], axis=1)
-    #     grid = jax.device_put(grid, device)
-    #     pdf = jnp.exp(target.log_prob(grid)).reshape(X.shape)
-    #     pdf = jax.device_put(pdf, jax.devices("cpu")[0])
-    #     levels = jnp.linspace(pdf.min(), pdf.max(), 20)
-    #     ax.contourf(X, Y, pdf, levels=levels, cmap="viridis", alpha=0.5)
-
-    # 3. Loop through and plot each trajectory
-    for i in range(batch_size):
-        color = colors[i]
-
-        # 4. Slice the valid part of the trajectory
-        valid_traj = trajectories[i, : trajectories_length[i]]
-
-        # 5. Plot the trajectory line
-        ax.plot(
-            valid_traj[:, dims[0]],
-            valid_traj[:, dims[1]],
-            color=color,
-            alpha=alpha,
-        )
-
-        # 6. Mark the start and end points
-        ax.scatter(
-            valid_traj[0, dims[0]],
-            valid_traj[0, dims[1]],
-            color=color,
-            marker="o",
-            s=marker_size,
-            edgecolors="black",
-            zorder=3,
-        )
-        ax.scatter(
-            valid_traj[-1, dims[0]],
-            valid_traj[-1, dims[1]],
-            color=color,
-            marker="X",
-            s=marker_size,
-            edgecolors="black",
-            zorder=3,
+    if level is None:
+        if is_forward:
+            samples = target.sample(jax.random.PRNGKey(0), (cfg.eval_samples,))
+        else:
+            dim = cfg.target.dim
+            initial_dist = distrax.MultivariateNormalDiag(
+                jnp.zeros(dim), jnp.ones(dim) * cfg.algorithm.init_std
+            )
+            samples = initial_dist.sample(
+                seed=jax.random.PRNGKey(0), sample_shape=(cfg.eval_samples,)
+            )
+        plot_marginal_pair(
+            samples[:, dims],
+            ax,
+            marginal_dims=dims,
+            bounds=bounds,
         )
 
     ax.set_xlabel(f"x{dims[0]+1}")
@@ -220,6 +153,129 @@ def visualize_trajectories(
         plt.show()
     else:
         plt.close()
+    return wb
+
+
+import numpy as np
+import jax.numpy as jnp
+import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
+from matplotlib.colors import LinearSegmentedColormap
+
+
+def visualize_trajectories(
+    trajectories,
+    trajectories_length,
+    target,
+    dims=(0, 1),
+    device="cpu",
+    alpha=0.95,
+    prefix="",
+    show=False,
+    fig=None,
+    ax=None,
+    start_color="#ffe84a",  # bright yellow
+    end_color="#d41111",  # deep red
+    linewidth=2.5,
+    start_marker_size=45,
+    end_marker_size=55,
+):
+    if fig is None or ax is None:
+        fig, ax = plt.subplots(figsize=(6, 6))
+
+    # Convert to numpy for matplotlib
+    trajectories = np.asarray(trajectories)
+    trajectories_length = np.asarray(trajectories_length)
+
+    bounds = (-target._plot_bound, target._plot_bound)
+    batch_size = trajectories.shape[0]
+
+    # Optional contour background
+    if trajectories.shape[-1] == 2:
+        plot_contours_2D(
+            target.log_prob,
+            trajectories.shape[-1],
+            ax,
+            marginal_dims=dims,
+            bounds=bounds,
+            levels=50,
+        )
+
+    # A high-contrast warm gradient for dark/cool backgrounds
+    traj_cmap = LinearSegmentedColormap.from_list(
+        "traj_warm",
+        [start_color, "#ff9f1c", end_color],
+        N=256,
+    )
+
+    for i in range(batch_size):
+        traj_len = int(trajectories_length[i])
+        if traj_len <= 0:
+            continue
+
+        valid_traj = trajectories[i, :traj_len]
+        points = valid_traj[:, list(dims)]
+
+        # Draw gradient line only if at least 2 points exist
+        if traj_len > 1:
+            segments = np.concatenate(
+                [points[:-1, None, :], points[1:, None, :]],
+                axis=1,
+            )
+
+            # One value per segment, smoothly increasing from 0 to 1
+            color_values = np.linspace(0.0, 1.0, traj_len - 1)
+
+            lc = LineCollection(
+                segments,
+                cmap=traj_cmap,
+                array=color_values,
+                linewidths=linewidth,
+                alpha=alpha,
+                capstyle="round",
+                joinstyle="round",
+                zorder=2,
+            )
+            ax.add_collection(lc)
+
+        # Start point
+        ax.scatter(
+            points[0, 0],
+            points[0, 1],
+            color=start_color,
+            marker="o",
+            s=start_marker_size,
+            edgecolors="black",
+            linewidths=0.8,
+            zorder=3,
+        )
+
+        # End point
+        ax.scatter(
+            points[-1, 0],
+            points[-1, 1],
+            color=end_color,
+            marker="X",
+            s=end_marker_size,
+            edgecolors="black",
+            linewidths=0.8,
+            zorder=4,
+        )
+
+    ax.set_xlabel(f"x{dims[0] + 1}")
+    ax.set_ylabel(f"x{dims[1] + 1}")
+    ax.grid(True, linestyle="--", alpha=0.35)
+    ax.set_xlim(bounds)
+    ax.set_ylim(bounds)
+    ax.set_aspect("equal", adjustable="box")
+
+    wb = {f"figures/{prefix + '_' if prefix else ''}vis": [wandb.Image(fig)]}
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
     return wb
 
 

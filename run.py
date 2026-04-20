@@ -20,7 +20,7 @@ def main(cfg: DictConfig) -> None:
     cfg = hydra.utils.instantiate(cfg)
     target = cfg.target.fn
 
-    run_name = f"{cfg.algorithm.name}_{cfg.target.name}_{target.dim}_{datetime.now()}_seed{cfg.seed}"
+    run_name = f"{cfg.cometml.prefix}_{cfg.algorithm.name}_{cfg.target.name}_{target.dim}_{datetime.now()}_seed{cfg.seed}"
     # if not cfg.wandb.get("name"):
     #     cfg.wandb.name = run_name
 

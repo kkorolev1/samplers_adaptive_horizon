@@ -31,7 +31,6 @@ def get_eval_fn(rnd, target, target_xs, cfg, visualize_heatmaps_fn=None):
         "logZ/reverse": [],
         "discrepancies/mmd": [],
         "discrepancies/sd": [],
-        "other/EMC": [],
         "stats/step": [],
         "stats/wallclock": [],
         "stats/nfe": [],
@@ -90,11 +89,13 @@ def get_eval_fn(rnd, target, target_xs, cfg, visualize_heatmaps_fn=None):
 
         logger.update(target.visualise(samples=samples))
         if cfg.target.dim == 2 and visualize_heatmaps_fn is not None:
-            visualize_heatmaps_fn(logger, model_state, target, cfg, samples.device)
+            visualize_heatmaps_fn(
+                logger, model_state, target, target_xs, cfg, samples.device
+            )
         logger.update(
             visualize_trajectories(
-                trajectories[:10],
-                trajectories_length[:10],
+                trajectories[:3],
+                trajectories_length[:3],
                 target,
                 dims=(0, 1),
                 device=samples.device,
@@ -104,17 +105,14 @@ def get_eval_fn(rnd, target, target_xs, cfg, visualize_heatmaps_fn=None):
         if cfg.compute_forward_metrics and target.can_sample:
             logger.update(
                 visualize_trajectories(
-                    fwd_trajectories[:10],
-                    fwd_trajectories_length[:10],
+                    fwd_trajectories[:3],
+                    fwd_trajectories_length[:3],
                     target,
                     dims=(0, 1),
                     device=samples.device,
                     prefix="trajectories_bwd",
                 )
             )
-
-        if cfg.compute_emc and cfg.target.has_entropy:
-            logger["other/EMC"].append(target.entropy(samples))
 
         for d in cfg.discrepancies:
             logger[f"discrepancies/{d}"].append(

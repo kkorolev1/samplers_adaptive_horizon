@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import wandb
 
 from algorithms.common.diffusion_related.init_model import init_model_non_acyclic
-from algorithms.common.eval_methods.stochastic_oc_methods import get_eval_fn
+from algorithms.common.eval_methods.mcmc_methods import get_eval_fn
 from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import rnd_mcmc
 from eval.utils import extract_last_entry
 from utils.print_utils import print_results
@@ -61,9 +61,6 @@ def gfn_non_acyclic_baseline(cfg, target, exp=None):
             logger["stats/step"].append(it)
             logger["stats/nfe"].append((it + 1) * batch_size)  # FIXME
             logger.update(eval_fn(model_state, key))
-            print_results(it, logger, cfg)
-            # if cfg.use_wandb:
-            #     wandb.log(extract_last_entry(logger), step=it)
             if cfg.use_cometml:
                 last_entry = extract_last_entry(logger)
                 metrics = {}

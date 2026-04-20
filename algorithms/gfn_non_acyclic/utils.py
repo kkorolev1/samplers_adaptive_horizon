@@ -42,11 +42,12 @@ def linear_annealing(
         return start_val + (end_val - start_val) * (num / denom)
 
 
-def visualize_heatmaps(logger, model_state, target, cfg, device):
+def visualize_heatmaps(logger, model_state, target, target_xs, cfg, device):
     logger.update(
         visualize_clf_heatmap(
             model_state,
             target,
+            cfg,
             is_forward=True,
             device=device,
             prefix="fwd_clf",
@@ -56,6 +57,7 @@ def visualize_heatmaps(logger, model_state, target, cfg, device):
         visualize_clf_heatmap(
             model_state,
             target,
+            cfg,
             is_forward=False,
             device=device,
             prefix="bwd_clf",

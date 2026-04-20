@@ -54,12 +54,13 @@ def create_figure_axes(cfg):
     return fig, axes[:num_subplots]
 
 
-def visualize_heatmaps(logger, model_state, target, cfg, device):
+def visualize_heatmaps(logger, model_state, target, target_xs, cfg, device):
     fig, axes = create_figure_axes(cfg)
     for level, ax in enumerate(axes, 1):
         visualize_clf_heatmap(
             model_state,
             target,
+            cfg,
             is_forward=True,
             level=level,
             device=device,
