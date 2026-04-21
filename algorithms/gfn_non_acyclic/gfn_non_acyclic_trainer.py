@@ -26,6 +26,34 @@ from algorithms.gfn_non_acyclic.utils import visualize_heatmaps
 from eval.discrepancies import compute_sd
 from eval.utils import extract_last_entry
 from utils.print_utils import print_results
+import os
+import pickle
+from flax import serialization
+
+
+def _get_checkpoint_dir(cfg):
+    ckpt_dir = getattr(cfg.algorithm, "checkpoint_dir", None)
+    if ckpt_dir is None:
+        ckpt_dir = os.path.join("checkpoints", cfg.target.name, cfg.algorithm.name)
+    os.makedirs(ckpt_dir, exist_ok=True)
+    return ckpt_dir
+
+
+def _get_checkpoint_path(cfg, iter):
+    suffix = ""
+    if not cfg.algorithm.model.learn_fwd_corrections:
+        suffix = "_small"
+    return os.path.join(_get_checkpoint_dir(cfg), f"model_params_{iter}{suffix}.pkl")
+
+
+def save_model_checkpoint(cfg, model_state, iter=None):
+    ckpt_path = _get_checkpoint_path(cfg, iter)
+    payload = {
+        "params": serialization.to_state_dict(model_state.params),
+        "iter": None if iter is None else int(iter),
+    }
+    with open(ckpt_path, "wb") as f:
+        pickle.dump(payload, f)
 
 
 def gfn_non_acyclic_trainer(cfg, target, exp=None):
@@ -200,19 +228,6 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
                 log_rewards,
                 losses,
             )
-    #         logZ_estimates.append(jax.nn.logsumexp(log_pbs_over_pfs + log_rewards))
-    #     logZ_init = jax.nn.logsumexp(jnp.stack(logZ_estimates)) - jnp.log(
-    #         buffer_cfg.prefill_steps * batch_size
-    #     )
-    # else:
-    #     key, key_gen = jax.random.split(key_gen)
-    #     _, (_, log_pbs_over_pfs, log_rewards, _) = loss_fwd_nograd_fn(
-    #         key, model_state, model_state.params
-    #     )
-    #     logZ_init = jax.nn.logsumexp(log_pbs_over_pfs + log_rewards) - jnp.log(batch_size)
-
-    # model_state.params["params"]["logZ"] = jnp.atleast_1d(logZ_init)
-    # print(f"logZ_init: {logZ_init:.4f}")
 
     def tree_l2_norm(tree):
         leaves = jax.tree_util.tree_leaves(tree)
@@ -359,6 +374,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
                 )
 
             print_results(it, logger, cfg)
+            save_model_checkpoint(cfg, model_state, iter=it)
 
             # if cfg.use_wandb:
             #     wandb.log(extract_last_entry(logger), step=it)
