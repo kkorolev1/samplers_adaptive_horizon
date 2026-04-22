@@ -456,3 +456,131 @@ def visualize_flow_heatmap(
     else:
         plt.close()
     return wb
+
+
+def visualize_kernel_drift(
+    model_state,
+    target,
+    cfg,
+    is_forward=True,
+    dims=(0, 1),
+    shrink=1.0,
+    quiver_stride: int = 2,
+    prefix="",
+    show=False,
+    fig=None,
+    ax=None,
+):
+    if fig is None or ax is None:
+        fig = plt.figure(figsize=(6, 6))
+        ax = fig.add_subplot()
+
+    bounds = (-target._plot_bound, target._plot_bound)
+    x = np.linspace(*bounds, 50)
+    y = np.linspace(*bounds, 50)
+    X, Y = np.meshgrid(x, y, indexing="xy")
+    grid = np.stack([X.ravel(), Y.ravel()], axis=1)
+    model = partial(model_state.apply_fn)
+
+    _, model_mean, *_ = model(model_state.params, grid, predict_fwd=is_forward)
+    gamma = float(cfg.algorithm.model.gamma)
+    drift = (model_mean - grid) / gamma
+    U = drift[:, dims[0]].reshape(X.shape)
+    V = drift[:, dims[1]].reshape(X.shape)
+    Xn = np.asarray(X)
+    Yn = np.asarray(Y)
+    Un = np.asarray(U)
+    Vn = np.asarray(V)
+    sl = slice(None, None, max(1, int(quiver_stride)))
+    mag = np.hypot(Un, Vn)
+    im = ax.contourf(
+        Xn,
+        Yn,
+        mag,
+        levels=20,
+        cmap="magma",
+        alpha=0.45,
+    )
+    ax.quiver(
+        Xn[sl, sl],
+        Yn[sl, sl],
+        Un[sl, sl],
+        Vn[sl, sl],
+        color="0.2",
+        angles="xy",
+        scale_units="xy",
+        width=0.005,
+    )
+    cbar = fig.colorbar(
+        im, shrink=shrink, label="Kernel drift norm", fraction=0.046, pad=0.04
+    )
+    cbar.ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:.2f}"))
+
+    ax.set_xlabel(f"x{dims[0]+1}")
+    ax.set_ylabel(f"x{dims[1]+1}")
+    ax.grid(True, linestyle="--", alpha=0.6)
+    ax.set_xlim((x.min(), x.max()))
+    ax.set_ylim((y.min(), y.max()))
+    ax.set_aspect("equal", adjustable="box")
+
+    wb = {f"figures/{prefix + '_' if prefix else ''}vis": [wandb.Image(fig)]}
+    if show:
+        plt.show()
+    else:
+        plt.close()
+    return wb
+
+
+def visualize_kernel_std(
+    model_state,
+    target,
+    cfg,
+    is_forward=True,
+    dims=(0, 1),
+    shrink=1.0,
+    prefix="",
+    show=False,
+    fig=None,
+    ax=None,
+):
+    if fig is None or ax is None:
+        fig = plt.figure(figsize=(6, 6))
+        ax = fig.add_subplot()
+
+    bounds = (-target._plot_bound, target._plot_bound)
+    x = np.linspace(*bounds, 50)
+    y = np.linspace(*bounds, 50)
+    X, Y = np.meshgrid(x, y, indexing="xy")
+    grid = np.stack([X.ravel(), Y.ravel()], axis=1)
+
+    model = partial(model_state.apply_fn)
+    _, _, model_scale, *_ = model(model_state.params, grid, predict_fwd=is_forward)
+    model_scale = np.linalg.norm(model_scale, axis=-1)
+    Z = np.array(model_scale.reshape(X.shape))
+    im = ax.contourf(
+        X,
+        Y,
+        Z,
+        levels=20,
+        cmap=white_blue_cmap,
+        alpha=1.0,
+    )
+
+    cbar = fig.colorbar(
+        im, shrink=shrink, label="Kernel std norm", fraction=0.046, pad=0.04
+    )
+    cbar.ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:.2f}"))
+
+    ax.set_xlabel(f"x{dims[0]+1}")
+    ax.set_ylabel(f"x{dims[1]+1}")
+    ax.grid(True, linestyle="--", alpha=0.6)
+    ax.set_xlim((x.min(), x.max()))
+    ax.set_ylim((y.min(), y.max()))
+    ax.set_aspect("equal", adjustable="box")
+
+    wb = {f"figures/{prefix + '_' if prefix else ''}vis": [wandb.Image(fig)]}
+    if show:
+        plt.show()
+    else:
+        plt.close()
+    return wb

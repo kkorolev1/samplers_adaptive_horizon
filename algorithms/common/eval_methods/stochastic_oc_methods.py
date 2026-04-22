@@ -89,7 +89,7 @@ def get_eval_fn(rnd, target, target_xs, cfg, visualize_heatmaps_fn=None):
 
         logger.update(target.visualise(samples=samples))
         if cfg.target.dim == 2 and visualize_heatmaps_fn is not None:
-            visualize_heatmaps_fn(logger, model_state, target, target_xs, cfg)
+            visualize_heatmaps_fn(logger, model_state, target, cfg)
         logger.update(
             visualize_trajectories(
                 trajectories,

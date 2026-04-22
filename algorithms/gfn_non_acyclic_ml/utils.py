@@ -82,17 +82,17 @@ def visualize_heatmaps(logger, model_state, target, cfg):
     logger.update({f"figures/bwd_clf_vis": [wandb.Image(fig)]})
     plt.close(fig)
 
-    # fig, axes = create_figure_axes(cfg)
-    # for level, ax in enumerate(axes, 1):
-    #     visualize_flow_clf_heatmap(
-    #         model_state,
-    #         target,
-    #         level=level,
-    #         fig=fig,
-    #         ax=ax,
-    #     )
-    # logger.update({f"figures/flow_bwd_clf_vis": [wandb.Image(fig)]})
-    # plt.close(fig)
+    fig, axes = create_figure_axes(cfg)
+    for level, ax in enumerate(axes, 1):
+        visualize_flow_clf_heatmap(
+            model_state,
+            target,
+            level=level,
+            fig=fig,
+            ax=ax,
+        )
+    logger.update({f"figures/flow_bwd_clf_vis": [wandb.Image(fig)]})
+    plt.close(fig)
 
     fig, axes = create_figure_axes(cfg)
     for level, ax in enumerate(axes, 1):

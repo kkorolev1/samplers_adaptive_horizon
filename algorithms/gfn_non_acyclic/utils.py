@@ -61,13 +61,13 @@ def visualize_heatmaps(logger, model_state, target, cfg):
             prefix="bwd_clf",
         )
     )
-    # logger.update(
-    #     visualize_flow_clf_heatmap(
-    #         model_state,
-    #         target,
-    #         prefix="flow_bwd_clf",
-    #     )
-    # )
+    logger.update(
+        visualize_flow_clf_heatmap(
+            model_state,
+            target,
+            prefix="flow_bwd_clf",
+        )
+    )
     logger.update(
         visualize_flow_heatmap(
             model_state,

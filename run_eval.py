@@ -1,42 +1,33 @@
 import os
 import pickle
+
 from flax import serialization
 import jax
-from typing import Tuple
-
-from algorithms.common.diffusion_related.init_model import init_model_non_acyclic
-
-import os
-from datetime import datetime
 import jax.numpy as jnp
+import numpy as np
 import distrax
-import itertools
-from matplotlib.colors import to_rgba
-from matplotlib.lines import Line2D
+
 
 import hydra
-import jax
-import matplotlib
-
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from functools import partial
 
-import matplotlib.patheffects as patheffects
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-from matplotlib.collections import LineCollection
+import matplotlib
+from matplotlib.lines import Line2D
 from matplotlib.colors import LinearSegmentedColormap
-import numpy as np
-from matplotlib.collections import LineCollection
-from matplotlib.colors import Normalize
 
-from utils.helper import flatten_dict, reset_device_memory
+from utils.helper import reset_device_memory
+from algorithms.common.diffusion_related.init_model import init_model_non_acyclic
 from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import rnd_mcmc, rnd_eval
 from algorithms.gfn_non_acyclic.gfn_non_acyclic_trainer import _get_checkpoint_path
 from utils.plot_utils import (
     plot_gradient_trajectory,
     marginal_density_grid,
     visualize_clf_heatmap,
+    visualize_kernel_drift,
+    visualize_kernel_std,
+    visualize_flow_clf_heatmap,
 )
 
 
@@ -178,9 +169,12 @@ def eval_fn(cfg, model_state, target):
     print("full model lengths: ", jnp.mean(traj_lengths))
     # visualize_trajectories(trajs, lengths, target)
 
-    visualize_clf_heatmap(
-        model_state, target, cfg, is_forward=True, alpha=0.2, show=True
-    )
+    # visualize_clf_heatmap(
+    #     model_state, target, cfg, is_forward=True, alpha=0.2, show=True
+    # )
+    # visualize_kernel_std(model_state, target, cfg, is_forward=False, show=True)
+    # visualize_kernel_drift(model_state, target, cfg, is_forward=True, show=True)
+    visualize_flow_clf_heatmap(model_state, target, show=True)
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="base_conf")
