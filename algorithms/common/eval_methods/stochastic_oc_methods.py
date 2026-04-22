@@ -89,27 +89,23 @@ def get_eval_fn(rnd, target, target_xs, cfg, visualize_heatmaps_fn=None):
 
         logger.update(target.visualise(samples=samples))
         if cfg.target.dim == 2 and visualize_heatmaps_fn is not None:
-            visualize_heatmaps_fn(
-                logger, model_state, target, target_xs, cfg, samples.device
-            )
+            visualize_heatmaps_fn(logger, model_state, target, target_xs, cfg)
         logger.update(
             visualize_trajectories(
-                trajectories[:3],
-                trajectories_length[:3],
+                trajectories,
+                trajectories_length,
                 target,
                 dims=(0, 1),
-                device=samples.device,
                 prefix="trajectories_fwd",
             )
         )
         if cfg.compute_forward_metrics and target.can_sample:
             logger.update(
                 visualize_trajectories(
-                    fwd_trajectories[:3],
-                    fwd_trajectories_length[:3],
+                    fwd_trajectories,
+                    fwd_trajectories_length,
                     target,
                     dims=(0, 1),
-                    device=samples.device,
                     prefix="trajectories_bwd",
                 )
             )

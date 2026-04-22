@@ -54,7 +54,7 @@ def create_figure_axes(cfg):
     return fig, axes[:num_subplots]
 
 
-def visualize_heatmaps(logger, model_state, target, target_xs, cfg, device):
+def visualize_heatmaps(logger, model_state, target, cfg):
     fig, axes = create_figure_axes(cfg)
     for level, ax in enumerate(axes, 1):
         visualize_clf_heatmap(
@@ -63,7 +63,6 @@ def visualize_heatmaps(logger, model_state, target, target_xs, cfg, device):
             cfg,
             is_forward=True,
             level=level,
-            device=device,
             fig=fig,
             ax=ax,
         )
@@ -77,25 +76,23 @@ def visualize_heatmaps(logger, model_state, target, target_xs, cfg, device):
             target,
             is_forward=False,
             level=level,
-            device=device,
             fig=fig,
             ax=ax,
         )
     logger.update({f"figures/bwd_clf_vis": [wandb.Image(fig)]})
     plt.close(fig)
 
-    fig, axes = create_figure_axes(cfg)
-    for level, ax in enumerate(axes, 1):
-        visualize_flow_clf_heatmap(
-            model_state,
-            target,
-            level=level,
-            device=device,
-            fig=fig,
-            ax=ax,
-        )
-    logger.update({f"figures/flow_bwd_clf_vis": [wandb.Image(fig)]})
-    plt.close(fig)
+    # fig, axes = create_figure_axes(cfg)
+    # for level, ax in enumerate(axes, 1):
+    #     visualize_flow_clf_heatmap(
+    #         model_state,
+    #         target,
+    #         level=level,
+    #         fig=fig,
+    #         ax=ax,
+    #     )
+    # logger.update({f"figures/flow_bwd_clf_vis": [wandb.Image(fig)]})
+    # plt.close(fig)
 
     fig, axes = create_figure_axes(cfg)
     for level, ax in enumerate(axes, 1):
@@ -103,7 +100,6 @@ def visualize_heatmaps(logger, model_state, target, target_xs, cfg, device):
             model_state,
             target,
             level=level,
-            device=device,
             fig=fig,
             ax=ax,
         )

@@ -10,12 +10,18 @@ import jax.numpy as jnp
 import distrax
 import matplotlib.pyplot as plt
 import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from matplotlib.collections import LineCollection
 from matplotlib.colors import LinearSegmentedColormap
 import wandb
 from functools import partial
+import matplotlib.patheffects as patheffects
+from matplotlib.colors import to_rgba
+
+white_blue_cmap = LinearSegmentedColormap.from_list(
+    "white_blue",
+    ["#ffffff", "#dbe9ff", "#8fb6ff", "#3b6fb6", "#0b1f4d"],
+)
 
 
 def plot_contours_2D(
@@ -47,7 +53,12 @@ def plot_contours_2D(
     else:
         z = jnp.exp(log_probs)
     z = z.reshape(n_points, n_points)
-    ax.contourf(x1, x2, z, levels=levels)
+    ax.contourf(
+        x1,
+        x2,
+        z,
+        levels=levels,
+    )
 
 
 def plot_marginal_pair(
@@ -78,8 +89,8 @@ def visualize_clf_heatmap(
     is_forward=True,
     level=None,
     dims=(0, 1),
-    device="cpu",
-    alpha=0.9,
+    color="#ad102d",
+    alpha=0.5,
     shrink=1.0,
     prefix="",
     show=False,
@@ -91,11 +102,10 @@ def visualize_clf_heatmap(
         ax = fig.add_subplot()
 
     bounds = (-target._plot_bound, target._plot_bound)
-    x = jnp.linspace(*bounds, 50)
-    y = jnp.linspace(*bounds, 50)
-    X, Y = jnp.meshgrid(x, y, indexing="xy")
-    grid = jnp.stack([X.ravel(), Y.ravel()], axis=1)
-    grid = jax.device_put(grid, device)
+    x = np.linspace(*bounds, 50)
+    y = np.linspace(*bounds, 50)
+    X, Y = np.meshgrid(x, y, indexing="xy")
+    grid = np.stack([X.ravel(), Y.ravel()], axis=1)
 
     model = partial(model_state.apply_fn)
 
@@ -115,9 +125,17 @@ def visualize_clf_heatmap(
             grid,
             predict_fwd=False,
         )
-    pdf = nn.sigmoid(clf_logits).reshape(X.shape)
+    pdf = np.array(nn.sigmoid(clf_logits).reshape(X.shape))
 
-    im = ax.pcolormesh(X, Y, pdf, cmap="viridis", alpha=alpha, shading="auto")
+    # im = ax.pcolormesh(X, Y, pdf, cmap="viridis", alpha=alpha, shading="auto")
+    im = ax.contourf(
+        X,
+        Y,
+        pdf,
+        levels=20,
+        cmap=white_blue_cmap,
+        alpha=1.0,
+    )
     cbar = fig.colorbar(
         im, shrink=shrink, label="Classifier probability", fraction=0.046, pad=0.04
     )
@@ -139,6 +157,8 @@ def visualize_clf_heatmap(
             ax,
             marginal_dims=dims,
             bounds=bounds,
+            color=color,
+            alpha=alpha,
         )
 
     ax.set_xlabel(f"x{dims[0]+1}")
@@ -156,11 +176,92 @@ def visualize_clf_heatmap(
     return wb
 
 
-import numpy as np
-import jax.numpy as jnp
-import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
-from matplotlib.colors import LinearSegmentedColormap
+def plot_gradient_trajectory(
+    ax: plt.Axes,
+    xy: np.ndarray,
+    color="red",
+    start_marker_color="#e86b95",
+    alpha_start: float = 0.4,
+    alpha_end: float = 1.0,
+    marker_size: float = 40,
+    linewidth: float = 1.5,
+):
+    if xy.shape[0] < 2:
+        ax.scatter(
+            xy[0, 0],
+            xy[0, 1],
+            c=start_marker_color,
+            s=marker_size,
+            edgecolors="black",
+            zorder=5,
+        )
+        return
+    pts = xy.reshape(-1, 1, 2)
+    segments = np.concatenate([pts[:-1], pts[1:]], axis=1)
+    nseg = len(segments)
+
+    base_rgba = np.array(to_rgba(color))
+    alphas = np.linspace(alpha_start, alpha_end, nseg)
+    colors = np.repeat(base_rgba[None, :], nseg, axis=0)
+    colors[:, -1] = alphas
+
+    lc = LineCollection(
+        segments,
+        colors=colors,
+        linewidths=linewidth,
+        zorder=4,
+        capstyle="round",
+    )
+    stroke_color = base_rgba.copy()
+    stroke_color[:3] = np.maximum(stroke_color[:3] - 0.5, 0.0)
+    lc.set_path_effects(
+        [patheffects.withStroke(linewidth=1.5, foreground=stroke_color)]
+    )
+    ax.add_collection(lc)
+    ax.scatter(
+        xy[0, 0],
+        xy[0, 1],
+        c=start_marker_color,
+        s=marker_size,
+        edgecolors="black",
+        zorder=5,
+    )
+    # end_color = base_rgba.copy()
+    # end_color[:3] = np.maximum(end_color[:3] - 0.3, 0.0)
+    ax.scatter(
+        xy[-1, 0],
+        xy[-1, 1],
+        c=start_marker_color,
+        s=marker_size,
+        edgecolors="black",
+        marker="X",
+        zorder=5,
+    )
+
+
+def marginal_density_grid(
+    target,
+    dim: int,
+    marginal_dims: Tuple[int, int],
+    bounds: tuple[float, float],
+    n_points: int = 110,
+):
+    x_points_dim1 = np.linspace(bounds[0], bounds[1], n_points)
+    x_points_dim2 = np.linspace(bounds[0], bounds[1], n_points)
+    x_points = np.array(list(itertools.product(x_points_dim1, x_points_dim2)))
+
+    def sliced_log_prob(x_arr):
+        xj = jnp.asarray(x_arr)
+        _x = jnp.zeros((xj.shape[0], dim))
+        _x = _x.at[:, marginal_dims].set(xj)
+        return target.log_prob(_x)
+
+    log_probs = sliced_log_prob(x_points)
+    log_probs = jnp.clip(log_probs, a_min=-1000, a_max=None)
+    z = jnp.exp(log_probs).reshape(n_points, n_points)
+    x1 = x_points[:, 0].reshape(n_points, n_points)
+    x2 = x_points[:, 1].reshape(n_points, n_points)
+    return np.asarray(x1), np.asarray(x2), np.asarray(z)
 
 
 def visualize_trajectories(
@@ -168,106 +269,41 @@ def visualize_trajectories(
     trajectories_length,
     target,
     dims=(0, 1),
-    device="cpu",
-    alpha=0.95,
-    prefix="",
-    show=False,
-    fig=None,
-    ax=None,
-    start_color="#ffe84a",  # bright yellow
-    end_color="#d41111",  # deep red
-    linewidth=2.5,
-    start_marker_size=45,
-    end_marker_size=55,
+    color="#ad102d",
+    num_examples: int = 3,
+    prefix: str = "",
+    show: bool = False,
 ):
-    if fig is None or ax is None:
-        fig, ax = plt.subplots(figsize=(6, 6))
+    batch_size = int(trajectories.shape[0])
+    dim = trajectories[0].shape[-1]
+    n = min(int(num_examples), batch_size)
+    dim = int(target.dim)
+    bounds = (-float(target._plot_bound), float(target._plot_bound))
+    d0, d1 = int(dims[0]), int(dims[1])
 
-    # Convert to numpy for matplotlib
-    trajectories = np.asarray(trajectories)
-    trajectories_length = np.asarray(trajectories_length)
+    fig, ax = plt.subplots(figsize=(6, 6))
 
-    bounds = (-target._plot_bound, target._plot_bound)
-    batch_size = trajectories.shape[0]
+    for i in range(n):
+        tl = int(trajectories_length[i])
+        valid = trajectories[i, :tl]
+        xy = np.asarray(jnp.stack([valid[:, d0], valid[:, d1]], axis=1))
+        plot_gradient_trajectory(ax, xy, color=color)
 
-    # Optional contour background
-    if trajectories.shape[-1] == 2:
-        plot_contours_2D(
-            target.log_prob,
-            trajectories.shape[-1],
-            ax,
-            marginal_dims=dims,
-            bounds=bounds,
-            levels=50,
-        )
-
-    # A high-contrast warm gradient for dark/cool backgrounds
-    traj_cmap = LinearSegmentedColormap.from_list(
-        "traj_warm",
-        [start_color, "#ff9f1c", end_color],
-        N=256,
+    x1d, x2d, zd = marginal_density_grid(target, dim, (d0, d1), bounds, n_points=110)
+    ax.contourf(
+        x1d,
+        x2d,
+        zd,
+        levels=20,
+        cmap=white_blue_cmap,
+        alpha=1.0,
     )
-
-    for i in range(batch_size):
-        traj_len = int(trajectories_length[i])
-        if traj_len <= 0:
-            continue
-
-        valid_traj = trajectories[i, :traj_len]
-        points = valid_traj[:, list(dims)]
-
-        # Draw gradient line only if at least 2 points exist
-        if traj_len > 1:
-            segments = np.concatenate(
-                [points[:-1, None, :], points[1:, None, :]],
-                axis=1,
-            )
-
-            # One value per segment, smoothly increasing from 0 to 1
-            color_values = np.linspace(0.0, 1.0, traj_len - 1)
-
-            lc = LineCollection(
-                segments,
-                cmap=traj_cmap,
-                array=color_values,
-                linewidths=linewidth,
-                alpha=alpha,
-                capstyle="round",
-                joinstyle="round",
-                zorder=2,
-            )
-            ax.add_collection(lc)
-
-        # Start point
-        ax.scatter(
-            points[0, 0],
-            points[0, 1],
-            color=start_color,
-            marker="o",
-            s=start_marker_size,
-            edgecolors="black",
-            linewidths=0.8,
-            zorder=3,
-        )
-
-        # End point
-        ax.scatter(
-            points[-1, 0],
-            points[-1, 1],
-            color=end_color,
-            marker="X",
-            s=end_marker_size,
-            edgecolors="black",
-            linewidths=0.8,
-            zorder=4,
-        )
-
-    ax.set_xlabel(f"x{dims[0] + 1}")
-    ax.set_ylabel(f"x{dims[1] + 1}")
-    ax.grid(True, linestyle="--", alpha=0.35)
-    ax.set_xlim(bounds)
-    ax.set_ylim(bounds)
+    ax.set_xlabel(f"x{d0 + 1}")
+    ax.set_ylabel(f"x{d1 + 1}")
+    ax.set_xlim(bounds[0], bounds[1])
+    ax.set_ylim(bounds[0], bounds[1])
     ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, linestyle="--", alpha=0.35)
 
     wb = {f"figures/{prefix + '_' if prefix else ''}vis": [wandb.Image(fig)]}
 
@@ -283,8 +319,6 @@ def visualize_flow_clf_heatmap(
     model_state,
     target,
     level=None,
-    device="cpu",
-    alpha=0.9,
     shrink=1.0,
     prefix="",
     show=False,
@@ -296,11 +330,10 @@ def visualize_flow_clf_heatmap(
         ax = fig.add_subplot()
 
     bounds = (-target._plot_bound, target._plot_bound)
-    x = jnp.linspace(*bounds, 50)
-    y = jnp.linspace(*bounds, 50)
-    X, Y = jnp.meshgrid(x, y, indexing="xy")
-    grid = jnp.stack([X.ravel(), Y.ravel()], axis=1)
-    grid = jax.device_put(grid, device)
+    x = np.linspace(*bounds, 50)
+    y = np.linspace(*bounds, 50)
+    X, Y = np.meshgrid(x, y, indexing="xy")
+    grid = np.stack([X.ravel(), Y.ravel()], axis=1)
 
     log_reward = target.log_prob(grid)
     model = partial(model_state.apply_fn)
@@ -322,9 +355,17 @@ def visualize_flow_clf_heatmap(
     )
     log_flow = log_reward - nn.log_sigmoid(fwd_clf_logits)
     log_prod = log_flow + nn.log_sigmoid(bwd_clf_logits)
-    prod = jnp.exp(log_prod).reshape(X.shape)
+    prod = np.array(jnp.exp(log_prod).reshape(X.shape))
 
-    im = ax.pcolormesh(X, Y, prod, cmap="viridis", alpha=alpha, shading="auto")
+    # im = ax.pcolormesh(X, Y, prod, cmap="viridis", alpha=alpha, shading="auto")
+    im = ax.contourf(
+        X,
+        Y,
+        prod,
+        levels=20,
+        cmap=white_blue_cmap,
+        alpha=1.0,
+    )
     cbar = fig.colorbar(
         im,
         shrink=shrink,
@@ -353,8 +394,6 @@ def visualize_flow_heatmap(
     model_state,
     target,
     level=None,
-    device="cpu",
-    alpha=0.9,
     shrink=1.0,
     prefix="",
     show=False,
@@ -366,11 +405,10 @@ def visualize_flow_heatmap(
         ax = fig.add_subplot()
 
     bounds = (-target._plot_bound, target._plot_bound)
-    x = jnp.linspace(*bounds, 50)
-    y = jnp.linspace(*bounds, 50)
-    X, Y = jnp.meshgrid(x, y, indexing="xy")
-    grid = jnp.stack([X.ravel(), Y.ravel()], axis=1)
-    grid = jax.device_put(grid, device)
+    x = np.linspace(*bounds, 50)
+    y = np.linspace(*bounds, 50)
+    X, Y = np.meshgrid(x, y, indexing="xy")
+    grid = np.stack([X.ravel(), Y.ravel()], axis=1)
 
     log_reward = target.log_prob(grid)
     model = partial(model_state.apply_fn)
@@ -385,9 +423,17 @@ def visualize_flow_heatmap(
         predict_fwd=True,
     )
     log_flow = log_reward - nn.log_sigmoid(fwd_clf_logits)
-    flow = jnp.exp(log_flow).reshape(X.shape)
+    flow = np.array(jnp.exp(log_flow).reshape(X.shape))
 
-    im = ax.pcolormesh(X, Y, flow, cmap="viridis", alpha=alpha, shading="auto")
+    # im = ax.pcolormesh(X, Y, flow, cmap="viridis", alpha=alpha, shading="auto")
+    im = ax.contourf(
+        X,
+        Y,
+        flow,
+        levels=20,
+        cmap=white_blue_cmap,
+        alpha=1.0,
+    )
     cbar = fig.colorbar(
         im,
         shrink=shrink,

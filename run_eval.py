@@ -33,6 +33,11 @@ from matplotlib.colors import Normalize
 from utils.helper import flatten_dict, reset_device_memory
 from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import rnd_mcmc, rnd_eval
 from algorithms.gfn_non_acyclic.gfn_non_acyclic_trainer import _get_checkpoint_path
+from utils.plot_utils import (
+    plot_gradient_trajectory,
+    marginal_density_grid,
+    visualize_clf_heatmap,
+)
 
 
 def load_trained_model(cfg, target):
@@ -59,94 +64,6 @@ white_blue_cmap = LinearSegmentedColormap.from_list(
 )
 
 
-def plot_gradient_trajectory(
-    ax: plt.Axes,
-    xy: np.ndarray,
-    color="red",
-    start_marker_color="#e86b95",
-    alpha_start: float = 0.4,
-    alpha_end: float = 1.0,
-    marker_size: float = 40,
-    linewidth: float = 1.5,
-):
-    if xy.shape[0] < 2:
-        ax.scatter(
-            xy[0, 0],
-            xy[0, 1],
-            c=start_marker_color,
-            s=85,
-            edgecolors="black",
-            zorder=5,
-        )
-        return
-    pts = xy.reshape(-1, 1, 2)
-    segments = np.concatenate([pts[:-1], pts[1:]], axis=1)
-    nseg = len(segments)
-
-    base_rgba = np.array(to_rgba(color))
-    alphas = np.linspace(alpha_start, alpha_end, nseg)
-    colors = np.repeat(base_rgba[None, :], nseg, axis=0)
-    colors[:, -1] = alphas
-
-    lc = LineCollection(
-        segments,
-        colors=colors,
-        linewidths=linewidth,
-        zorder=4,
-        capstyle="round",
-    )
-    stroke_color = base_rgba.copy()
-    stroke_color[:3] = np.maximum(stroke_color[:3] - 0.5, 0.0)
-    lc.set_path_effects(
-        [patheffects.withStroke(linewidth=1.5, foreground=stroke_color)]
-    )
-    ax.add_collection(lc)
-    ax.scatter(
-        xy[0, 0],
-        xy[0, 1],
-        c=start_marker_color,
-        s=marker_size,
-        edgecolors="black",
-        zorder=5,
-    )
-    # end_color = base_rgba.copy()
-    # end_color[:3] = np.maximum(end_color[:3] - 0.3, 0.0)
-    ax.scatter(
-        xy[-1, 0],
-        xy[-1, 1],
-        c=start_marker_color,
-        s=marker_size,
-        edgecolors="black",
-        marker="X",
-        zorder=5,
-    )
-
-
-def marginal_density_grid(
-    target,
-    dim: int,
-    marginal_dims: Tuple[int, int],
-    bounds: tuple[float, float],
-    n_points: int = 110,
-):
-    x_points_dim1 = np.linspace(bounds[0], bounds[1], n_points)
-    x_points_dim2 = np.linspace(bounds[0], bounds[1], n_points)
-    x_points = np.array(list(itertools.product(x_points_dim1, x_points_dim2)))
-
-    def sliced_log_prob(x_arr):
-        xj = jnp.asarray(x_arr)
-        _x = jnp.zeros((xj.shape[0], dim))
-        _x = _x.at[:, marginal_dims].set(xj)
-        return target.log_prob(_x)
-
-    log_probs = sliced_log_prob(x_points)
-    log_probs = jnp.clip(log_probs, a_min=-1000, a_max=None)
-    z = jnp.exp(log_probs).reshape(n_points, n_points)
-    x1 = x_points[:, 0].reshape(n_points, n_points)
-    x2 = x_points[:, 1].reshape(n_points, n_points)
-    return np.asarray(x1), np.asarray(x2), np.asarray(z)
-
-
 def visualize_trajectories(
     trajectories,
     trajectories_length,
@@ -159,14 +76,14 @@ def visualize_trajectories(
     dim = trajectories[0].shape[-1]
     n = min(int(num_examples), batch_size)
     dim = int(target.dim)
-    # bounds = (-float(target._plot_bound), float(target._plot_bound))
-    bounds = (-5, 5)
+    bounds = (-float(target._plot_bound), float(target._plot_bound))
+    # bounds = (-5, 5)
     d0, d1 = int(dims[0]), int(dims[1])
 
     fig, ax = plt.subplots(figsize=(6, 6))
     x1d, x2d, zd = marginal_density_grid(target, dim, (d0, d1), bounds, n_points=110)
 
-    colors = ["#db7e56", "#818865"]
+    colors = ["#f7c860", "#ad102d"]
 
     for i in range(len(trajectories)):
         color = colors[i]
@@ -221,7 +138,7 @@ def eval_fn_one(rnd, model_state, key):
 
 
 def eval_fn(cfg, model_state, target):
-    key_gen = jax.random.PRNGKey(100)  # 63
+    key_gen = jax.random.PRNGKey(12)
 
     dim = target.dim
     alg_cfg = cfg.algorithm
@@ -259,7 +176,11 @@ def eval_fn(cfg, model_state, target):
     lengths = [ula_traj_lengths, traj_lengths]
     print("ula lengths: ", jnp.mean(ula_traj_lengths))
     print("full model lengths: ", jnp.mean(traj_lengths))
-    visualize_trajectories(trajs, lengths, target)
+    # visualize_trajectories(trajs, lengths, target)
+
+    visualize_clf_heatmap(
+        model_state, target, cfg, is_forward=True, alpha=0.2, show=True
+    )
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="base_conf")

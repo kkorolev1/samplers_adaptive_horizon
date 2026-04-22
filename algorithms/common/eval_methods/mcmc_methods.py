@@ -49,11 +49,10 @@ def get_eval_fn(rnd, target, target_xs, cfg):
         logger.update(target.visualise(samples=samples))
         logger.update(
             visualize_trajectories(
-                trajectories[:10],
-                trajectories_length[:10],
+                trajectories,
+                trajectories_length,
                 target,
                 dims=(0, 1),
-                device=samples.device,
                 prefix="trajectories_fwd",
             )
         )
