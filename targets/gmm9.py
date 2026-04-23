@@ -27,12 +27,22 @@ class GMM9(Target):
         self.seed = seed
         self.n_mixes = num_components
 
-        values = [-5, 0, 5]
-        # override self.mean, self.scale, and mixture
-        self.mean = jnp.array(
-            [[x, y] for x in values for y in values], dtype=jnp.float32
-        )
-        self.scale = jnp.sqrt(jnp.ones(2, dtype=jnp.float32) * 0.5477222)[
+        if dim == 2:
+            values = [-5, 0, 5]
+            # override self.mean, self.scale, and mixture
+            self.mean = jnp.array(
+                [[x, y] for x in values for y in values], dtype=jnp.float32
+            )
+        else:
+            key = jax.random.PRNGKey(0)
+            self.mean = jax.random.uniform(
+                key,
+                shape=(num_components, dim),
+                minval=-5.0,
+                maxval=5.0,
+                dtype=jnp.float32,
+            )
+        self.scale = jnp.sqrt(jnp.ones(dim, dtype=jnp.float32) * 0.5477222)[
             None, :
         ].repeat(num_components, axis=0)
         weights = jnp.array(
@@ -58,6 +68,27 @@ class GMM9(Target):
         log_prob = self.distribution.log_prob(x)
         if not batched:
             log_prob = jnp.squeeze(log_prob, axis=0)
+        return log_prob
+
+    def log_prob_marginal_pair(self, x_2d: chex.Array, i: int, j: int) -> chex.Array:
+        # Marginalize the GMM to coordinates (i, j)
+        # Extract relevant (i, j) from means and covariances/scales for each component
+        # All weights remain the same; covariance is diagonal
+
+        means_ij = self.mean[:, [i, j]]  # (num_components, 2)
+        scales_ij = self.scale[:, [i, j]]  # (num_components, 2)
+
+        mixture_dist = self.mixture_dist
+        components_dist = distrax.Independent(
+            distrax.Normal(loc=means_ij, scale=scales_ij), reinterpreted_batch_ndims=1
+        )
+
+        marginal_distribution = distrax.MixtureSameFamily(
+            mixture_distribution=mixture_dist,
+            components_distribution=components_dist,
+        )
+
+        log_prob = marginal_distribution.log_prob(x_2d)
         return log_prob
 
     def log_prob_t(
@@ -139,61 +170,49 @@ class GMM9(Target):
                 plt.close()
             return wb
         else:
-            return {}  # TODO: add visualisation for higher dimensions
+            plotting_bounds = (-self._plot_bound, self._plot_bound)
+            grid_width_n_points = 100
+            fig, axs = plt.subplots(2, 2, figsize=(8, 8), sharex="row", sharey="row")
+            if samples is not None:
+                samples = jnp.clip(samples, plotting_bounds[0], plotting_bounds[1])
+            for i in range(2):
+                for j in range(2):
+                    xx, yy = jnp.meshgrid(
+                        jnp.linspace(
+                            plotting_bounds[0], plotting_bounds[1], grid_width_n_points
+                        ),
+                        jnp.linspace(
+                            plotting_bounds[0], plotting_bounds[1], grid_width_n_points
+                        ),
+                    )
+                    x_points = jnp.column_stack([xx.ravel(), yy.ravel()])
+                    log_probs = self.log_prob_marginal_pair(x_points, i, j + 2)
+                    log_probs = jnp.clip(log_probs, -1000, a_max=None).reshape(
+                        (grid_width_n_points, grid_width_n_points)
+                    )
+                    axs[i, j].contour(xx, yy, log_probs, levels=20)
+
+                    if samples is not None:
+                        # plot samples
+                        axs[i, j].plot(samples[:, i], samples[:, j + 2], "o", alpha=0.5)
+
+                    if j == 0:
+                        axs[i, j].set_ylabel(f"$x_{i + 1}$")
+                    if i == 1:
+                        axs[i, j].set_xlabel(f"$x_{j + 1 + 2}$")
+
+            plt.tight_layout()
+            wb = {f"figures/{prefix + '_' if prefix else ''}vis": [wandb.Image(fig)]}
+            if show:
+                plt.show()
+            else:
+                plt.close()
+            return wb
 
 
 if __name__ == "__main__":
-    # gmm = GMM40()
-    # samples = gmm.sample(jax.random.PRNGKey(0), (2000,))
-    # gmm.log_prob(samples)
-    # gmm.entropy(samples)
-    # # gmm.visualise( show=True)
-    # gmm.visualise(show=True)
-    from eval import discrepancies
-
     key = jax.random.PRNGKey(0)
-    target = GMM9(dim=50)
-    sample1 = target.sample(key, (2000,))
+    target = GMM9(dim=10)
+    samples = target.sample(key, (2000,))
 
-    min_sd = jnp.inf
-    max_sd = 0.0
-    sd_list = []
-    mmd_list = []
-    n_trial = 5
-
-    sd_self = discrepancies.compute_sd(sample1, sample1, None)
-    print(f"Self sd: {sd_self:.4f}")
-    mmd_self = discrepancies.compute_mmd(sample1, sample1, None)
-    print(f"Self mmd: {mmd_self:.4f}")
-
-    key = jax.random.PRNGKey(99999)
-    _, keygen = jax.random.split(key)
-    for i in range(1, n_trial + 1):
-        key2, keygen = jax.random.split(keygen)
-
-        sample2 = target.sample(key2, (2000,))
-        sd = discrepancies.compute_sd(sample1, sample2, None)
-        sd_list.append(sd)
-        mmd = discrepancies.compute_mmd(sample1, sample2, None)
-        mmd_list.append(mmd)
-        if sd < min_sd:
-            min_sd = sd
-            best_key2 = key2
-        if sd > max_sd:
-            max_sd = sd
-            worst_key2 = key2
-        running_mean_sd = sum(sd_list) / i
-        running_mean_mmd = sum(mmd_list) / i
-        print(
-            f"Iteration {i} - Best sd: {min_sd:.2f}, Worst sd: {max_sd:.2f}, Running mean sd: {running_mean_sd:.2f}, Running mean mmd: {running_mean_mmd:.3f}"
-        )
-
-    sd_list = jnp.array(sd_list)
-    mmd_list = jnp.array(mmd_list)
-    mean_sd = sum(sd_list) / n_trial
-    std_sd = jnp.std(sd_list)
-    mean_mmd = sum(mmd_list) / n_trial
-    std_mmd = jnp.std(mmd_list)
-    print(
-        f"Final (n_trial = {n_trial}) - Best sd: {min_sd:.2f}, Worst sd: {max_sd:.2f}, Mean sd: {mean_sd:.2f}, Std sd: {std_sd:.2f}, Mean mmd: {mean_mmd:.3f}, Std mmd: {std_mmd:.3f}"
-    )
+    target.visualise(samples, show=True)

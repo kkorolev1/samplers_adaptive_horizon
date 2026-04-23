@@ -18,63 +18,6 @@ fn:
 # !!! Default Parameters; Currently not tuned for this experiment !!!
 # ----------------------------------------
 
-mfvi: # Gaussian Mean Field Variational Inference
-  init_std: 1.
-  step_size: 1e-3
-
-gmmvi: # Gaussian Mixture Model Variational Inference
-  init_std: 1.
-
-nfvi: # Normalizing Flow Variational Inference
-  init_std: 1.
-  step_size: 1e-3
-
-mh:
-  rwm_step_size: [0.1, 0.1]
-
-hmc:  # Hamilton Monte Carlo
-  hmc_step_size: [0.1, 0.1]
-
-smc: # Sequential Monte Carlo Sampler
-  init_std: 1.
-
-smc_advanced:
-  init_std: 1.0
-  target_ess: 0.99
-  hmc_step_size: [0.2, 0.1]
-
-flow_transport: # Flow Transport Methods (AFT/CRAFT)
-  init_std: 1.
-  step_size: 1e-3
-
-fab: # Flow Annealed Importance Sampling Bootstrap
-  init_std: 1.
-  step_size: 5e-4
-
-ud_langevin:  # Underdamped Langevin Methods (UHA/LDVI)
-  max_diffusion: 1.
-  init_std: 1.
-  step_size: 5e-4
-
-od_langevin:  # Overdamped Langevin Methods (ULA/MCD)
-  max_diffusion: 1.
-  init_std: 1.
-  step_size: 5e-4
-
-cmcd:  # Controlled Monte Carlo Diffusions
-  max_diffusion: 1.
-  init_std: 1.
-  step_size: 5e-4
-
-dis: # Time-reversed Diffusion Sampler
-  init_std: 1.
-  step_size: 5e-4
-
-gbs:  # General Bridge Sampler
-  max_diffusion: 1.
-  init_std: 1.
-  step_size: 5e-4
-
 ############# HYPERPARAMETERS USED IN OUR PAPER #############
 # These can be slightly different from the original settings
 
@@ -110,23 +53,27 @@ gfn_subtb: # Sub-Trajectory Balance
 gfn_non_acyclic:
   init_std: 1.0
   weight_decay: 0.0
-  step_size: 1e-3
-  bwd_step_size: 1e-3
+  step_size: 1e-4
+  bwd_step_size: 1e-4
   logZ_step_size: 1e-1
   init_logZ: 0.
-  gamma: 0.1
+  gamma: 0.01
   reg_coef: 0.0
   num_steps: 100
   eval_max_steps: 500
   loss_type: tb
   logr_clip: -1e5
   huber_delta: null
-  grad_clip: 1.0
+  grad_clip: 0.001
 
 all: # Parameters that are shared between all algorithms
   batch_size: 2000
   iters: 50000
   milestones: [10000, 20000, 30000, 40000]
   num_steps: 64
-  use_lp: False
+  use_lp: True
   num_hid: 128
+  fwd_log_var_range: 2
+  bwd_log_var_range: 2
+  outer_clip: 2e1
+  inner_clip: 1e1

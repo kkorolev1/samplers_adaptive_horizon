@@ -25,7 +25,7 @@ gfn_non_acyclic:
   logZ_step_size: 1e-1
   init_logZ: 0.
   gamma: 0.1
-  reg_coef: 0.0
+  reg_coef: 1.0
   num_steps: 100
   eval_max_steps: 500
   loss_type: tb
@@ -41,7 +41,7 @@ gfn_non_acyclic_ml:
   logZ_step_size: 1e-1
   init_logZ: 0.
   gamma: 0.1
-  reg_coef: 0.0
+  reg_coef: 1.0
   num_steps: 100
   eval_max_steps: 500
   logr_clip: -1e5
@@ -64,8 +64,12 @@ diff_sampler_clf:
 
 all: # Parameters that are shared between all algorithms
   batch_size: 2000
-  iters: 30000
-  milestones: [10000, 20000]
+  iters: 50000
+  milestones: [10000, 20000, 30000, 40000]
   num_steps: 64
   use_lp: True
   num_hid: 64
+  fwd_log_var_range: 4
+  bwd_log_var_range: 4
+  outer_clip: 1e1
+  inner_clip: 1e2

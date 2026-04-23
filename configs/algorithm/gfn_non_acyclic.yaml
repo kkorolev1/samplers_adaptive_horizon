@@ -30,6 +30,10 @@ defaults:
 model:
   use_lp: ${target.all.use_lp}
   num_hid: ${target.all.num_hid}
+  fwd_log_var_range: ${target.all.fwd_log_var_range}
+  bwd_log_var_range: ${target.all.bwd_log_var_range}
+  outer_clip: ${target.all.outer_clip}
+  inner_clip: ${target.all.inner_clip}
 
 buffer:
   use: True
