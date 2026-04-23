@@ -9,7 +9,7 @@ import distrax
 
 
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from functools import partial
 
 import matplotlib.pyplot as plt
@@ -20,7 +20,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from utils.helper import reset_device_memory
 from algorithms.common.diffusion_related.init_model import init_model_non_acyclic
 from algorithms.gfn_non_acyclic.gfn_non_acyclic_rnd import rnd_mcmc, rnd_eval
-from algorithms.gfn_non_acyclic.gfn_non_acyclic_trainer import _get_checkpoint_path
+from algorithms.gfn_non_acyclic.gfn_non_acyclic_trainer import get_checkpoint_path
 from utils.plot_utils import (
     plot_gradient_trajectory,
     marginal_density_grid,
@@ -37,7 +37,7 @@ def load_trained_model(cfg, target):
 
     # Recreate the model state with the same architecture/config
     model_state = init_model_non_acyclic(key, dim, cfg.algorithm)
-    ckpt_path = _get_checkpoint_path(cfg, iter=cfg.ckpt_iter)
+    ckpt_path = get_checkpoint_path(cfg, iter=cfg.ckpt_iter)
 
     with open(ckpt_path, "rb") as f:
         payload = pickle.load(f)
@@ -46,6 +46,9 @@ def load_trained_model(cfg, target):
     model_state = model_state.replace(params=params)
 
     print(f"Loaded checkpoint from iter {payload.get('iter', 'unknown')}")
+    # cfg_loaded = OmegaConf.create(payload["config"])
+    print(f"Config succesfully loaded from checkpoint")
+
     return model_state
 
 
@@ -129,7 +132,7 @@ def eval_fn_one(rnd, model_state, key):
 
 
 def eval_fn(cfg, model_state, target):
-    key_gen = jax.random.PRNGKey(12)
+    key_gen = jax.random.PRNGKey(150)
 
     dim = target.dim
     alg_cfg = cfg.algorithm
@@ -138,7 +141,7 @@ def eval_fn(cfg, model_state, target):
         jnp.zeros(dim), jnp.ones(dim) * alg_cfg.init_std
     )
 
-    batch_size = 1
+    batch_size = 2000
     # cfg.eval_samples
 
     rnd_ula = partial(
@@ -163,18 +166,41 @@ def eval_fn(cfg, model_state, target):
 
     ula_trajs, ula_traj_lengths = eval_fn_one(rnd_ula, model_state, key_gen)
     trajs, traj_lengths = eval_fn_one(rnd_full_model, model_state, key_gen)
+
+    def find_index(xs):
+        x_coords = xs[..., 0]
+        in_region1 = (x_coords >= -3) & (x_coords <= -1.5)
+        in_region2 = (x_coords >= 1.5) & (x_coords <= 3)
+        has_region1 = jnp.any(in_region1, axis=1)
+        has_region2 = jnp.any(in_region2, axis=1)
+        mask = has_region1 & has_region2
+        indices = jnp.where(mask)[0]
+        if len(indices) > 0:
+            print("Found!")
+        else:
+            print("Not found!")
+        return indices[0] if len(indices) > 0 else 0
+
+    def slice_by_index(xs, i):
+        return xs[i : i + 1]
+
+    # select_idx = jnp.argmax(traj_lengths)
+    select_idx = find_index(trajs)
+    ula_trajs = slice_by_index(ula_trajs, select_idx)
+    ula_traj_lengths = slice_by_index(ula_traj_lengths, select_idx)
+    trajs = slice_by_index(trajs, select_idx)
+    traj_lengths = slice_by_index(traj_lengths, select_idx)
+
     trajs = [ula_trajs, trajs]
     lengths = [ula_traj_lengths, traj_lengths]
     print("ula lengths: ", jnp.mean(ula_traj_lengths))
     print("full model lengths: ", jnp.mean(traj_lengths))
     # visualize_trajectories(trajs, lengths, target)
 
-    # visualize_clf_heatmap(
-    #     model_state, target, cfg, is_forward=True, alpha=0.2, show=True
-    # )
+    visualize_clf_heatmap(model_state, target, cfg, is_forward=True, show=True)
     # visualize_kernel_std(model_state, target, cfg, is_forward=False, show=True)
     # visualize_kernel_drift(model_state, target, cfg, is_forward=True, show=True)
-    visualize_flow_clf_heatmap(model_state, target, show=True)
+    # visualize_flow_clf_heatmap(model_state, target, show=True)
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="base_conf")

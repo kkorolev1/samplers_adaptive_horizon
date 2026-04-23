@@ -8,6 +8,7 @@ from functools import partial
 import distrax
 import jax
 import jax.numpy as jnp
+from omegaconf import OmegaConf
 
 import wandb
 
@@ -31,7 +32,7 @@ import pickle
 from flax import serialization
 
 
-def _get_checkpoint_dir(cfg):
+def get_checkpoint_dir(cfg):
     ckpt_dir = getattr(cfg.algorithm, "checkpoint_dir", None)
     if ckpt_dir is None:
         ckpt_dir = os.path.join("checkpoints", cfg.target.name, cfg.algorithm.name)
@@ -39,18 +40,19 @@ def _get_checkpoint_dir(cfg):
     return ckpt_dir
 
 
-def _get_checkpoint_path(cfg, iter):
+def get_checkpoint_path(cfg, iter):
     suffix = ""
     if not cfg.algorithm.model.learn_fwd_corrections:
         suffix = "_small"
-    return os.path.join(_get_checkpoint_dir(cfg), f"model_params_{iter}{suffix}.pkl")
+    return os.path.join(get_checkpoint_dir(cfg), f"model_params_{iter}{suffix}.pkl")
 
 
 def save_model_checkpoint(cfg, model_state, iter=None):
-    ckpt_path = _get_checkpoint_path(cfg, iter)
+    ckpt_path = get_checkpoint_path(cfg, iter)
     payload = {
         "params": serialization.to_state_dict(model_state.params),
         "iter": None if iter is None else int(iter),
+        "config": OmegaConf.to_container(cfg, resolve=True),
     }
     with open(ckpt_path, "wb") as f:
         pickle.dump(payload, f)

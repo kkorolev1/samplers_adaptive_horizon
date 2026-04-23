@@ -75,4 +75,4 @@ all: # Parameters that are shared between all algorithms
   milestones: [10000, 15000]
   num_steps: 64
   use_lp: False
-  num_hid: 256
+  num_hid: 128
