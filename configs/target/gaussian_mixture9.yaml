@@ -68,7 +68,7 @@ all: # Parameters that are shared between all algorithms
   milestones: [10000, 20000, 30000, 40000]
   num_steps: 64
   use_lp: True
-  num_hid: 64
+  num_hid: 128
   fwd_log_var_range: 4
   bwd_log_var_range: 4
   outer_clip: 1e1

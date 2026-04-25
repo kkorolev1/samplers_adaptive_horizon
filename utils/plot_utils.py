@@ -482,7 +482,10 @@ def visualize_kernel_drift(
     grid = np.stack([X.ravel(), Y.ravel()], axis=1)
     model = partial(model_state.apply_fn)
 
-    _, model_mean, *_ = model(model_state.params, grid, predict_fwd=is_forward)
+    lgv_term = jax.vmap(jax.grad(target.log_prob))(grid)
+    _, model_mean, *_ = model(
+        model_state.params, grid, lgv_term=lgv_term, predict_fwd=is_forward
+    )
     gamma = float(cfg.algorithm.model.gamma)
     drift = (model_mean - grid) / gamma
     U = drift[:, dims[0]].reshape(X.shape)
@@ -555,7 +558,11 @@ def visualize_kernel_std(
 
     model = partial(model_state.apply_fn)
     _, _, model_scale, *_ = model(model_state.params, grid, predict_fwd=is_forward)
-    model_scale = np.linalg.norm(model_scale, axis=-1)
+    if len(model_scale.shape) >= 2:
+        model_scale = np.linalg.norm(model_scale, axis=-1)
+    else:
+        model_scale = model_scale * jnp.ones((grid.shape[0],), dtype=jnp.float32)
+
     Z = np.array(model_scale.reshape(X.shape))
     im = ax.contourf(
         X,

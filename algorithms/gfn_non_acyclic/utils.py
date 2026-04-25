@@ -3,6 +3,8 @@ from utils.plot_utils import (
     visualize_clf_heatmap,
     visualize_flow_clf_heatmap,
     visualize_flow_heatmap,
+    visualize_kernel_drift,
+    visualize_kernel_std,
 )
 
 
@@ -73,5 +75,21 @@ def visualize_heatmaps(logger, model_state, target, cfg):
             model_state,
             target,
             prefix="flow",
+        )
+    )
+    logger.update(
+        visualize_kernel_drift(
+            model_state,
+            target,
+            cfg,
+            prefix="kernel_drift",
+        )
+    )
+    logger.update(
+        visualize_kernel_std(
+            model_state,
+            target,
+            cfg,
+            prefix="kernel_std",
         )
     )

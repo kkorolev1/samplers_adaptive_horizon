@@ -25,10 +25,6 @@ def get_eval_fn(rnd, target, target_xs, cfg, visualize_heatmaps_fn=None):
     logger = {
         "KL/elbo": [],
         "KL/eubo": [],
-        "logZ/delta_forward": [],
-        "logZ/forward": [],
-        "logZ/delta_reverse": [],
-        "logZ/reverse": [],
         "discrepancies/mmd": [],
         "discrepancies/sd": [],
         "stats/step": [],
@@ -56,15 +52,10 @@ def get_eval_fn(rnd, target, target_xs, cfg, visualize_heatmaps_fn=None):
             jnp.arange(trajectories.shape[0]), trajectories_length - 1
         ]
         log_is_weights = -running_costs
-        ln_z = jax.scipy.special.logsumexp(log_is_weights) - jnp.log(cfg.eval_samples)
         elbo = jnp.mean(log_is_weights)
-
-        if target.log_Z is not None:
-            logger["logZ/delta_reverse"].append(jnp.abs(ln_z - target.log_Z))
 
         logger["mean_traj_length/reverse"].append(jnp.mean(trajectories_length))
         logger["max_traj_length/reverse"].append(jnp.max(trajectories_length))
-        logger["logZ/reverse"].append(ln_z)
         logger["KL/elbo"].append(elbo)
 
         if cfg.compute_forward_metrics and target.can_sample:
@@ -75,14 +66,7 @@ def get_eval_fn(rnd, target, target_xs, cfg, visualize_heatmaps_fn=None):
                 fwd_trajectories_length,
             ) = rnd_forward(jax.random.PRNGKey(0), model_state, *params)[:5]
             fwd_log_is_weights = -fwd_running_costs
-            fwd_ln_z = jax.scipy.special.logsumexp(fwd_log_is_weights) - jnp.log(
-                cfg.eval_samples
-            )
             eubo = jnp.mean(fwd_log_is_weights)
-
-            if target.log_Z is not None:
-                logger["logZ/delta_forward"].append(jnp.abs(fwd_ln_z - target.log_Z))
-            logger["logZ/forward"].append(fwd_ln_z)
             logger["KL/eubo"].append(eubo)
             logger["mean_traj_length/forward"].append(jnp.mean(fwd_trajectories_length))
             logger["max_traj_length/forward"].append(jnp.max(fwd_trajectories_length))

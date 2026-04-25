@@ -20,6 +20,8 @@ class NonAcyclicNet(nn.Module):
     learn_fwd_corrections: bool = True
     shared_model: bool = False
 
+    min_clf_logits: float = -100.0
+
     def setup(self):
         self.fwd_pred_dim = (
             1 + 2 * self.dim + (self.dim if self.use_lp else 0)
@@ -120,6 +122,7 @@ class NonAcyclicNet(nn.Module):
 
         fwd_mean = jnp.clip(fwd_mean, -self.outer_clip, self.outer_clip)
         fwd_clf_logits = fwd_clf_logits.squeeze(-1)
+        fwd_clf_logits = jnp.clip(fwd_clf_logits, min=self.min_clf_logits)
 
         # if force_stop:
         #     fwd_clf_logits = jnp.full_like(fwd_clf_logits, 100.0)
@@ -140,13 +143,15 @@ class NonAcyclicNet(nn.Module):
             axis=-1,
         )
         # fmt: off
-        bwd_drift = jnp.clip(-nn.softplus(bwd_mean_corr) * s, -self.outer_clip, self.outer_clip)
+        # bwd_drift = jnp.clip(-nn.softplus(bwd_mean_corr) * s, -self.outer_clip, self.outer_clip)
+        bwd_drift = jnp.clip(bwd_mean_corr, -self.outer_clip, self.outer_clip)
         bwd_mean = s + bwd_drift * self.gamma
         bwd_scale = jnp.sqrt(
             jnp.exp(self.bwd_log_var_range * nn.tanh(bwd_scale_corr)) * self.gamma
         )
         bwd_mean = jnp.clip(bwd_mean, -self.outer_clip, self.outer_clip)
         bwd_clf_logits = bwd_clf_logits.squeeze(-1)
+        bwd_clf_logits = jnp.clip(bwd_clf_logits, min=self.min_clf_logits)
 
         # if force_stop:
         #     bwd_clf_logits = jnp.full_like(bwd_clf_logits, 100.0)
