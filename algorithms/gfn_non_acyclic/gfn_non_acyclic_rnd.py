@@ -235,6 +235,7 @@ def loss_fn_prefix_tb(
     reg_coef: float = 0.0,
     huber_delta: float | None = None,
     use_weights: bool = True,
+    only_clf_reg: bool = False,
 ):
     (trajectories, log_rewards, log_pfs_over_pbs, fwd_clf_logits, log_fs) = rnd_partial(
         key, model_state, params
@@ -276,7 +277,9 @@ def loss_fn_prefix_tb(
         tb_losses = jnp.square(discrepancy)
 
     tb_losses = tb_losses * weights
-    losses = tb_losses.sum(-1) + reg_coef * (jnp.exp(log_fs[:, 1:]) * weights).sum(-1)
+    reg_term = jnp.exp(fwd_clf_log_probs) if only_clf_reg else jnp.exp(log_fs[:, 1:])
+
+    losses = tb_losses.sum(-1) + reg_coef * (reg_term * weights).sum(-1)
 
     return jnp.mean(losses), (
         trajectories[:, -1],

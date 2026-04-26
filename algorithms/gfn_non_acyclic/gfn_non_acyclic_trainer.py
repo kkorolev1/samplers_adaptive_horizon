@@ -167,6 +167,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
             huber_delta=alg_cfg.huber_delta,
             reg_coef=reg_coef,
             use_weights=alg_cfg.use_weights,
+            only_clf_reg=alg_cfg.only_clf_reg,
         )
     else:
         raise ValueError(f"Unknown loss type {alg_cfg.loss_type}")
@@ -323,6 +324,7 @@ def gfn_non_acyclic_trainer(cfg, target, exp=None):
                 if grads is not None
                 else jnp.nan
             )
+
             exp.log_metrics(
                 {
                     "loss": jnp.mean(losses),

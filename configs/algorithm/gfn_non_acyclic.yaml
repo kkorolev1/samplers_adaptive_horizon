@@ -17,6 +17,7 @@ huber_delta: ${target.gfn_non_acyclic.huber_delta}
 reg_coef: ${target.gfn_non_acyclic.reg_coef}
 eval_max_steps: ${target.gfn_non_acyclic.eval_max_steps}
 use_weights: True
+only_clf_reg: False
 
 # Learning rate scheduler
 lr_schedule:

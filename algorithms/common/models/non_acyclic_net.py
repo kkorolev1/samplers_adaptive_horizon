@@ -143,8 +143,8 @@ class NonAcyclicNet(nn.Module):
             axis=-1,
         )
         # fmt: off
-        # bwd_drift = jnp.clip(-nn.softplus(bwd_mean_corr) * s, -self.outer_clip, self.outer_clip)
-        bwd_drift = jnp.clip(bwd_mean_corr, -self.outer_clip, self.outer_clip)
+        bwd_drift = jnp.clip(-nn.softplus(bwd_mean_corr) * s, -self.outer_clip, self.outer_clip)
+        # bwd_drift = jnp.clip(bwd_mean_corr, -self.outer_clip, self.outer_clip)
         bwd_mean = s + bwd_drift * self.gamma
         bwd_scale = jnp.sqrt(
             jnp.exp(self.bwd_log_var_range * nn.tanh(bwd_scale_corr)) * self.gamma
