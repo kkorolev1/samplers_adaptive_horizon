@@ -88,7 +88,6 @@ def visualize_heatmaps(logger, model_state, target, cfg):
         visualize_flow_clf_heatmap(
             model_state,
             target,
-            cfg,
             level=level,
             fig=fig,
             ax=ax,
