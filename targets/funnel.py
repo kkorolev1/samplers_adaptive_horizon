@@ -82,8 +82,8 @@ class Funnel(Target):
         # plt.ylabel('Y')
         plt.xticks([])
         plt.yticks([])
-        # plt.xlim(-10, 5)
-        # plt.ylim(-5, 5)
+        plt.xlim(-self._plot_bound, self._plot_bound)
+        plt.ylim(-self._plot_bound, self._plot_bound)
 
         # plt.savefig(os.path.join(project_path('./samples/funnel/'), f"{prefix}funnel.pdf"), bbox_inches='tight', pad_inches=0.1)
 
